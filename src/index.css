@@ -463,9 +463,8 @@ select option { background: var(--surface2); }
   /* Toast: float above bottom nav */
   .toast-container { left: 12px; right: 12px; bottom: 66px; }
   .toast { min-width: 0; width: 100%; }
-}
 
-  /* Sub-nav on mobile */
+  /* Sub-nav */
   .sub-nav { padding: 0 16px; }
 }
 
