@@ -5,6 +5,7 @@ import Icon from './Icon'
 const NAV = [
   { id: 'overview',  label: 'Overview',  icon: 'home' },
   { id: 'calendar',  label: 'Calendar',  icon: 'calendar' },
+  { id: 'clients',   label: 'Clients',   icon: 'user' },
   { id: 'services',  label: 'Services',  icon: 'scissors' },
   { id: 'settings',  label: 'Settings',  icon: 'sliders' },
 ]
