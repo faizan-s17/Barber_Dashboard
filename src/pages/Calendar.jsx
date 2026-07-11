@@ -111,6 +111,7 @@ export default function Calendar({ profile }) {
   const [monthCursor, setMonthCursor] = useState(() => firstOfMonth(new Date()))
   const [monthSelDay, setMonthSelDay] = useState(null)
   const [showNew,     setShowNew]     = useState(false)
+  const [exportOpen,  setExportOpen]  = useState(false)
 
   // Load barbers + services once
   useEffect(() => {
@@ -176,6 +177,62 @@ export default function Calendar({ profile }) {
   const confirmedCount  = appts.filter(a => a.status === 'confirmed').length
   const cancelledCount  = appts.filter(a => a.status === 'cancelled').length
 
+  function exportCSV() {
+    const TZ = 'Europe/London'
+    const fmtDT = iso => new Date(iso).toLocaleString('en-GB', { timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    const headers = ['Date/Time', 'Customer', 'Phone', 'Service', 'Barber', 'Status', 'Notes']
+    const rows = appts.map(a => [
+      fmtDT(a.start_time), a.customer_name || '', a.customer_phone || '', a.service_name || '', a.barber_name || '', a.status || '', a.notes || ''
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`))
+    const csv = [headers.map(h => `"${h}"`).join(','), ...rows.map(r => r.join(','))].join('\n')
+    const el = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })),
+      download: `bookings-${new Date().toISOString().slice(0,10)}.csv`,
+    })
+    el.click(); URL.revokeObjectURL(el.href)
+  }
+
+  function exportPDF() {
+    const TZ = 'Europe/London'
+    const fmtDT = iso => new Date(iso).toLocaleString('en-GB', { timeZone: TZ, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const statusColor = s => ({ confirmed: '#16a34a', cancelled: '#dc2626', rescheduled: '#3b82f6' }[s] || '#6b7280')
+    const rows = appts.map(a => `<tr>
+      <td>${esc(fmtDT(a.start_time))}</td>
+      <td>${esc(a.customer_name)}</td>
+      <td>${esc(a.customer_phone)}</td>
+      <td>${esc(a.service_name)}</td>
+      <td>${esc(a.barber_name)}</td>
+      <td style="color:${statusColor(a.status)};font-weight:600">${esc(a.status)}</td>
+    </tr>`).join('')
+    const rangeLabel = isMonth
+      ? `${MONTHS[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`
+      : `${fmt(weekStart)} – ${fmt(addDays(weekStart, 6))}`
+    const w = window.open('', '_blank')
+    w.document.write(`<!DOCTYPE html><html><head><title>Bookings</title><style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:Arial,sans-serif;font-size:11px;padding:28px;color:#111}
+      .header{margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid #d4a017}
+      h1{font-size:20px;font-weight:700;color:#0f2027}
+      .meta{font-size:11px;color:#666;margin-top:4px}
+      table{border-collapse:collapse;width:100%}
+      th{background:#0f2027;color:#d4a017;text-align:left;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+      td{padding:7px 10px;border-bottom:1px solid #e8e8e8;font-size:12px}
+      tr:nth-child(even) td{background:#f7f9fa}
+      @media print{body{padding:16px}thead{display:table-header-group}}
+    </style></head><body>
+    <div class="header">
+      <h1>Barber Shop — Bookings</h1>
+      <div class="meta">${rangeLabel} · ${appts.length} booking${appts.length !== 1 ? 's' : ''} · Exported ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+    </div>
+    <table>
+      <thead><tr><th>Date/Time</th><th>Customer</th><th>Phone</th><th>Service</th><th>Barber</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></body></html>`)
+    w.document.close()
+    setTimeout(() => w.print(), 400)
+  }
+
   return (
     <>
       <div className="topbar">
@@ -197,6 +254,19 @@ export default function Calendar({ profile }) {
           <button className="btn btn-ghost btn-sm" onClick={next}>Next →</button>
 
           <div style={{ flex: 1 }} />
+
+          <div style={{ position: 'relative' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setExportOpen(o => !o)}>Export ▾</button>
+            {exportOpen && (
+              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', zIndex: 50, minWidth: 130, boxShadow: '0 4px 16px rgba(0,0,0,.35)' }}
+                onMouseLeave={() => setExportOpen(false)}>
+                <div className="dropdown-item" style={{ padding: '6px 14px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}
+                  onClick={() => { exportCSV(); setExportOpen(false) }}>Download CSV</div>
+                <div className="dropdown-item" style={{ padding: '6px 14px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}
+                  onClick={() => { exportPDF(); setExportOpen(false) }}>Save as PDF</div>
+              </div>
+            )}
+          </div>
 
           <button className="btn btn-gold btn-sm" onClick={() => setShowNew(true)}>+ New Booking</button>
 
