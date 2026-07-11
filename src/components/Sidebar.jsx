@@ -6,7 +6,9 @@ const NAV = [
   { id: 'overview',  label: 'Overview',  icon: 'home' },
   { id: 'calendar',  label: 'Calendar',  icon: 'calendar' },
   { id: 'clients',   label: 'Clients',   icon: 'user' },
+  { id: 'calls',     label: 'Calls',     icon: 'phone' },
   { id: 'services',  label: 'Services',  icon: 'scissors' },
+  { id: 'health',    label: 'AI Health', icon: 'activity' },
   { id: 'settings',  label: 'Settings',  icon: 'sliders' },
 ]
 

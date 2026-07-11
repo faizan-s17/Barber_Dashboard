@@ -8,6 +8,8 @@ import Services from './pages/Services'
 import Calendar from './pages/Calendar'
 import SettingsHub from './pages/SettingsHub'
 import Clients from './pages/Clients'
+import Calls from './pages/Calls'
+import AutomationHealth from './pages/AutomationHealth'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -82,9 +84,11 @@ export default function App() {
       <main className="main">
         {page === 'overview'  && <Overview    profile={profile} />}
         {page === 'calendar'  && <Calendar    profile={profile} />}
-        {page === 'clients'   && <Clients     isAdmin={isAdmin} />}
-        {page === 'services'  && <Services    isAdmin={isAdmin} />}
-        {page === 'settings'  && <SettingsHub isAdmin={isAdmin} />}
+        {page === 'clients'   && <Clients          isAdmin={isAdmin} />}
+        {page === 'calls'     && <Calls />}
+        {page === 'health'    && <AutomationHealth />}
+        {page === 'services'  && <Services         isAdmin={isAdmin} />}
+        {page === 'settings'  && <SettingsHub      isAdmin={isAdmin} />}
       </main>
       <ToastContainer />
     </div>
