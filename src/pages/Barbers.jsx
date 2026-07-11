@@ -69,6 +69,58 @@ export default function Barbers({ isAdmin }) {
     load()
   }
 
+  function exportCSV() {
+    const headers = ['Name', 'Email', 'Role', 'Status']
+    const rows = barbers.map(b => [b.name, b.email || '', b.role, b.active ? 'Active' : 'Inactive']
+      .map(v => `"${String(v).replace(/"/g, '""')}"`)
+    )
+    const csv = [headers.map(h => `"${h}"`).join(','), ...rows.map(r => r.join(','))].join('\n')
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })),
+      download: `barbers-${new Date().toISOString().slice(0, 10)}.csv`,
+    })
+    a.click(); URL.revokeObjectURL(a.href)
+  }
+
+  function exportPDF() {
+    const rows = barbers.map(b => {
+      const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      const statusColor = b.active ? '#16a34a' : '#6b7280'
+      return `<tr>
+        <td>${esc(b.name)}</td>
+        <td>${esc(b.email)}</td>
+        <td>${esc(b.role)}</td>
+        <td style="color:${statusColor};font-weight:600">${b.active ? 'Active' : 'Inactive'}</td>
+      </tr>`
+    }).join('')
+    const w = window.open('', '_blank')
+    w.document.write(`<!DOCTYPE html><html><head><title>Staff List</title><style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:Arial,sans-serif;font-size:11px;padding:28px;color:#111}
+      .header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid #d4a017}
+      h1{font-size:20px;font-weight:700;color:#0f2027}
+      .meta{font-size:11px;color:#666;margin-top:4px}
+      table{border-collapse:collapse;width:100%}
+      th{background:#0f2027;color:#d4a017;text-align:left;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+      td{padding:7px 10px;border-bottom:1px solid #e8e8e8;font-size:12px}
+      tr:nth-child(even) td{background:#f7f9fa}
+      @media print{body{padding:16px}thead{display:table-header-group}}
+    </style></head><body>
+    <div class="header">
+      <div>
+        <h1>Barber Shop — Staff List</h1>
+        <div class="meta">Exported ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} · ${barbers.length} record${barbers.length !== 1 ? 's' : ''}</div>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </body></html>`)
+    w.document.close()
+    setTimeout(() => w.print(), 400)
+  }
+
   return (
     <>
       <div className="topbar">
@@ -80,7 +132,11 @@ export default function Barbers({ isAdmin }) {
       <div className="page">
         <div className="page-header">
           <span className="page-title">{barbers.length} barber{barbers.length !== 1 ? 's' : ''}</span>
-          {isAdmin && <button className="btn btn-gold" onClick={openAdd}>+ Add barber</button>}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn btn-ghost btn-sm" onClick={exportCSV} title="Download CSV">↓ CSV</button>
+            <button className="btn btn-ghost btn-sm" onClick={exportPDF} title="Print / Save PDF">↓ PDF</button>
+            {isAdmin && <button className="btn btn-gold" onClick={openAdd}>+ Add barber</button>}
+          </div>
         </div>
 
         {loading ? (
