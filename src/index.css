@@ -9,6 +9,7 @@
   --gold: #c9a96e;
   --gold-dim: rgba(201,169,110,0.15);
   --gold-hover: #d9bc8a;
+  --on-accent: #1a1510;
   --text: #f0f0f0;
   --text-muted: #888;
   --text-dim: #555;
@@ -16,6 +17,24 @@
   --red: #f87171;
   --sidebar-w: 240px;
   --radius: 8px;
+}
+
+[data-theme="light"] {
+  --bg: #faf8f4;
+  --surface: #ffffff;
+  --surface2: #f5f0e8;
+  --surface3: #ede6d8;
+  --border: #d8cfc0;
+  --gold: #9a6f35;
+  --gold-dim: rgba(154,111,53,.12);
+  --gold-hover: #7d5a2a;
+  --on-accent: #ffffff;
+  --text: #1a1510;
+  --text-muted: #5a4f40;
+  --text-dim: #9a8f80;
+  --green: #16a34a;
+  --red: #dc2626;
+  --blue: #2563eb;
 }
 
 body {
@@ -105,19 +124,20 @@ body {
   background: var(--gold);
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 13px; color: #111;
+  font-weight: 700; font-size: 13px; color: var(--on-accent);
   flex-shrink: 0;
 }
 .sidebar-user-info { flex: 1; min-width: 0; }
 .sidebar-user-info strong { font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-user-info span { font-size: 11px; color: var(--gold); }
-.logout-btn {
+.logout-btn, .theme-btn {
   background: none; border: none; color: var(--text-muted);
   cursor: pointer; padding: 4px; border-radius: 4px;
   display: flex; align-items: center; font-size: 16px;
   transition: color .15s;
 }
 .logout-btn:hover { color: var(--red); }
+.theme-btn:hover { color: var(--gold); }
 
 /* ── Topbar ── */
 .topbar {

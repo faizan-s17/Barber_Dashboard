@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { supabase } from './supabase'
 import { ToastContainer, toast } from './components/Toast'
 import Sidebar from './components/Sidebar'
@@ -16,6 +16,14 @@ export default function App() {
   const [profile, setProfile] = useState(null)
   const [profState, setProfState] = useState('loading') // loading | found | not_found
   const [page, setPage] = useState('overview')
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark')
+
+  useLayoutEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('theme', theme)
+  }, [theme])
+
+  function toggleTheme() { setTheme(t => t === 'dark' ? 'light' : 'dark') }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -80,7 +88,7 @@ export default function App() {
 
   return (
     <div className="layout">
-      <Sidebar page={page} setPage={setPage} profile={profile} />
+      <Sidebar page={page} setPage={setPage} profile={profile} theme={theme} toggleTheme={toggleTheme} />
       <main className="main">
         {page === 'overview'  && <Overview    profile={profile} />}
         {page === 'calendar'  && <Calendar    profile={profile} />}

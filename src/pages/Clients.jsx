@@ -212,7 +212,7 @@ export default function Clients({ isAdmin }) {
                     <tr key={c.id}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div style={{ width: 30, height: 30, background: 'var(--gold)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, color: '#111', flexShrink: 0 }}>
+                          <div style={{ width: 30, height: 30, background: 'var(--gold)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, color: 'var(--on-accent)', flexShrink: 0 }}>
                             {c.name.charAt(0).toUpperCase()}
                           </div>
                           <div>

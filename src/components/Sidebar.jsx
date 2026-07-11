@@ -12,7 +12,7 @@ const NAV = [
   { id: 'settings',  label: 'Settings',  icon: 'sliders' },
 ]
 
-export default function Sidebar({ page, setPage, profile }) {
+export default function Sidebar({ page, setPage, profile, theme, toggleTheme }) {
   const initials = profile?.name ? profile.name.charAt(0).toUpperCase() : '?'
 
   async function logout() {
@@ -50,6 +50,9 @@ export default function Sidebar({ page, setPage, profile }) {
           <strong>{profile?.name || 'Barber'}</strong>
           <span>{profile?.role === 'admin' ? 'Admin' : 'Barber'}</span>
         </div>
+        <button className="theme-btn" onClick={toggleTheme} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme">
+          <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
+        </button>
         <button className="logout-btn" onClick={logout} title="Sign out">
           <Icon name="logout" size={16} />
         </button>
