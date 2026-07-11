@@ -18,6 +18,7 @@ export default function Clients({ isAdmin }) {
   const [form,     setForm]     = useState(EMPTY)
   const [saving,   setSaving]   = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -170,8 +171,18 @@ export default function Clients({ isAdmin }) {
           />
           <div style={{ flex: 1 }} />
           <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn btn-ghost btn-sm" onClick={exportCSV}>↓ CSV</button>
-            <button className="btn btn-ghost btn-sm" onClick={exportPDF}>↓ PDF</button>
+            <div style={{ position: 'relative' }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setExportOpen(o => !o)}>Export ▾</button>
+              {exportOpen && (
+                <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', zIndex: 50, minWidth: 130, boxShadow: '0 4px 16px rgba(0,0,0,.35)' }}
+                  onMouseLeave={() => setExportOpen(false)}>
+                  <div style={{ padding: '6px 14px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}
+                    className="dropdown-item" onClick={() => { exportCSV(); setExportOpen(false) }}>Download CSV</div>
+                  <div style={{ padding: '6px 14px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}
+                    className="dropdown-item" onClick={() => { exportPDF(); setExportOpen(false) }}>Save as PDF</div>
+                </div>
+              )}
+            </div>
             <button className="btn btn-gold" onClick={openAdd}>+ Add client</button>
           </div>
         </div>
