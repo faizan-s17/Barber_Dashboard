@@ -1,0 +1,3956 @@
+{
+  "name": "SkyWeb Barber AI Receptionist - Phase 0-8",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "skyweb-barber-basic",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "49615701-b428-404f-954a-504878ba2a9e",
+      "name": "Vapi Webhook - Barber Receptionist",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1408,
+        736
+      ],
+      "webhookId": "e58414c0-05f7-4eec-bacd-f0efbf6a6e96"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Shop data from Supabase (passed in from Fetch Shop Data HTTP node) ─────────\nconst shopData = $json || {};\nconst cfg  = shopData.config   || {};\nconst svcs = Array.isArray(shopData.services) ? shopData.services : [];\nconst brbs = Array.isArray(shopData.barbers)  ? shopData.barbers  : [];\n\nconst shop = {\n  name:         cfg.name         || 'SkyWeb Barber Co',\n  timezone:     cfg.timezone     || 'Europe/London',\n  shopEmail:    cfg.shop_email   || 'theskyweb.uk@gmail.com',\n  phone:        cfg.phone        || '',\n  address:      cfg.address      || '',\n  parking:      cfg.parking      || '',\n  hoursText:    cfg.hours_text   || '',\n  cancellation: cfg.cancellation || '',\n  payment:      cfg.payment      || '',\n  barbers:      brbs.map(b => b.name),\n  barberEmails: Object.fromEntries(brbs.map(b => [b.name, b.email])),\n  services:     svcs.map(s => [s.name, s.price]),\n  serviceDurations: Object.fromEntries(svcs.map(s => [s.name.toLowerCase(), s.duration_minutes])),\n  openHours: cfg.open_hours || { 1:['09:00','19:00'], 2:['09:00','19:00'], 3:['09:00','19:00'], 4:['09:00','19:00'], 5:['09:00','19:00'], 6:['09:00','17:00'], 7:null }\n};\n\n// ── Parse incoming webhook request ────────────────────────────────────────────\nconst webhookItem = $('Vapi Webhook - Barber Receptionist').first();\nconst raw0 = (webhookItem && webhookItem.json && (webhookItem.json.body ?? webhookItem.json)) || {};\n\nlet fnName = '';\nlet args = {};\nlet toolCallId = '';\nconst msg = raw0.message || {};\nif (Array.isArray(msg.toolCalls) && msg.toolCalls.length) {\n  const tc = msg.toolCalls[0] || {};\n  toolCallId = tc.id || '';\n  fnName = (tc.function && tc.function.name) || '';\n  let a = (tc.function && tc.function.arguments) || {};\n  if (typeof a === 'string') { try { a = JSON.parse(a); } catch (e) { a = {}; } }\n  args = a || {};\n} else if (msg.functionCall) {\n  fnName = msg.functionCall.name || '';\n  args = msg.functionCall.parameters || {};\n}\nconst b = Object.assign({}, raw0, args);\nconst norm = v => String(v == null ? '' : v).trim();\nconst lower = v => norm(v).toLowerCase();\nconst intentRaw = lower(b.intent || b.action || fnName || '');\nconst topic = lower(b.topic || b.question || '');\nconst blob = intentRaw + ' ' + topic;\n\n// ── Intent routing ───────────────────────────────────────────────────────────\nconst isLoc       = /location|address|direction|where|find you|park/.test(blob);\nconst isHours     = /hour|open|close|time/.test(blob);\nconst isHuman     = /human|staff|person|receptionist|call.?back|manager|someone|talk to/.test(intentRaw);\nconst isFaqPrice  = /pric|price|cost|how much|charge/.test(blob);\nconst isFaqServices = /service|offer|do you do/.test(blob);\nconst isFaqBarbers  = /barber|stylist|who.*cut/.test(blob);\nconst isFaqPay    = /pay|payment|card|cash/.test(blob);\nconst isFaqCancel = /refund|no.?show|cancellation policy/.test(blob);\nconst isBooking   = intentRaw === 'book_appointment'   || /book|appointment|schedule/.test(intentRaw);\nconst isCheckAvail= intentRaw === 'check_availability' || /availab|free slot|any slots|got space/.test(intentRaw);\nconst isLookup    = intentRaw === 'lookup_appointment' || /my appointment|my booking|when is my|do i have|check my booking|find my booking/.test(blob);\nconst isReschedule= intentRaw === 'reschedule_appointment' || /reschedul|move my|change my appointment|change my booking|different time/.test(blob);\nconst isCancel    = intentRaw === 'cancel_appointment' || /cancel my|cancel the|cancel that|cancel appointment|cancel booking/.test(blob);\nconst isWalkIn    = intentRaw === 'walk_in_today'      || /right now|as soon as possible|asap|today.*(fit|squeeze)|walk.?in|come in now|can i come in/.test(blob);\n\nlet route = 'booking_stub';\nif      (isWalkIn)     { route = 'walk_in_today'; }\nelse if (isCancel)     { route = 'cancel_appointment'; }\nelse if (isReschedule) { route = 'reschedule_appointment'; }\nelse if (isLookup)     { route = 'lookup_appointment'; }\nelse if (isCheckAvail) { route = 'check_availability'; }\nelse if (isBooking)    { route = 'book_appointment'; }\nelse if (intentRaw === 'get_shop_info') { route = isLoc ? 'shop_location' : 'shop_hours'; }\nelse if (intentRaw === 'get_services_pricing') { route = 'faq'; }\nelse if (intentRaw === 'request_human' || isHuman) { route = 'request_human'; }\nelse if (isLoc)        { route = 'shop_location'; }\nelse if (isHours)      { route = 'shop_hours'; }\nelse if (isFaqPrice || isFaqServices || isFaqBarbers || isFaqPay || isFaqCancel || intentRaw === 'faq') { route = 'faq'; }\n\nlet faqTopic = 'general';\nif      (isFaqPrice)    faqTopic = 'pricing';\nelse if (isFaqServices) faqTopic = 'services';\nelse if (isFaqBarbers)  faqTopic = 'barbers';\nelse if (isFaqPay)      faqTopic = 'payment';\nelse if (isFaqCancel)   faqTopic = 'cancellation';\n\n// ── Field extraction ─────────────────────────────────────────────────────────\nconst callbackNumber  = norm(b.callback_number || b.phone || '');\nconst customerName    = norm(b.customer_name   || b.name  || '');\nconst phone           = norm(b.phone           || '');\nconst email           = norm(b.email           || b.customer_email || '');\nconst serviceTypeRaw  = lower(b.service_type   || b.service || '');\nconst preferredBarber = norm(b.preferred_barber || b.barber || '');\nconst preferredDate   = norm(b.preferred_date  || b.date   || '');\nconst preferredTime   = norm(b.preferred_time  || b.time   || '');\nconst notes           = norm(b.notes || '');\nconst confirmCancel   = b.confirm_cancel === true || b.confirm_cancel === 'true' || b.confirmed === true || lower(b.confirm_cancel) === 'yes';\n\n// ── Service matching ─────────────────────────────────────────────────────────\nconst matchedService = shop.services.find(s => s[0].toLowerCase() === serviceTypeRaw) ||\n  shop.services.find(s => serviceTypeRaw && s[0].toLowerCase().indexOf(serviceTypeRaw) >= 0);\nconst serviceName     = matchedService ? matchedService[0] : '';\nconst servicePrice    = matchedService ? matchedService[1] : '';\nconst serviceKey      = serviceName.toLowerCase();\nconst durationMinutes = shop.serviceDurations[serviceKey] || 30;\n\n// ── Validation ───────────────────────────────────────────────────────────────\nlet errors = [];\nif (route === 'request_human' && !callbackNumber) { errors.push('callback_number (a phone number for the shop to call back) is required'); }\nif ((route === 'lookup_appointment' || route === 'reschedule_appointment' || route === 'cancel_appointment') && !phone) { errors.push('phone is required'); }\nif (route === 'walk_in_today') {\n  if (!serviceTypeRaw) errors.push('service_type is required');\n  else if (!serviceName) errors.push('service_type was not recognised, please pick one of our listed services');\n}\nif (route === 'book_appointment' || route === 'check_availability' || route === 'reschedule_appointment') {\n  if (route !== 'reschedule_appointment') {\n    if (!serviceTypeRaw) errors.push('service_type is required');\n    else if (!serviceName) errors.push('service_type was not recognised, please pick one of our listed services');\n  } else if (serviceTypeRaw && !serviceName) {\n    errors.push('service_type was not recognised, please pick one of our listed services');\n  }\n  if (!preferredDate) errors.push('preferred_date is required (YYYY-MM-DD)');\n  if (!preferredTime) errors.push('preferred_time is required (HH:MM, 24-hour)');\n}\nif (route === 'book_appointment') {\n  if (!customerName) errors.push('customer_name is required');\n  if (!phone)        errors.push('phone is required');\n  if (!email)        errors.push('email is required');\n}\n\n// ── Date/time calculation ────────────────────────────────────────────────────\nlet startISO = '';\nlet endISO   = '';\nlet dayOfWeek = 0;\nlet withinHours = false;\nlet dateLabel = '';\nif (preferredDate && preferredTime && errors.length === 0) {\n  const dt = DateTime.fromISO(preferredDate + 'T' + preferredTime, { zone: shop.timezone });\n  if (!dt.isValid) {\n    errors.push('preferred_date or preferred_time could not be understood, please use YYYY-MM-DD and HH:MM');\n  } else {\n    dayOfWeek = dt.weekday;\n    const hoursForDay = shop.openHours[dayOfWeek];\n    if (!hoursForDay) {\n      withinHours = false;\n    } else {\n      const openDt = DateTime.fromISO(preferredDate + 'T' + hoursForDay[0], { zone: shop.timezone });\n      const closeDt= DateTime.fromISO(preferredDate + 'T' + hoursForDay[1], { zone: shop.timezone });\n      const endDt  = dt.plus({ minutes: durationMinutes });\n      withinHours  = dt >= openDt && endDt <= closeDt;\n    }\n    startISO  = dt.toISO();\n    endISO    = dt.plus({ minutes: durationMinutes }).toISO();\n    dateLabel = dt.toFormat('cccc d LLLL');\n  }\n}\n\n// ── FAQ answers ──────────────────────────────────────────────────────────────\nconst valid        = errors.length === 0;\nconst servicesList = shop.services.map(s => s[0]).join(', ');\nconst priceList    = shop.services.map(s => s[0] + ' ' + s[1]).join(', ');\n\nlet faqAnswer = '';\nif      (faqTopic === 'pricing')      faqAnswer = 'Here are our prices: ' + priceList + '. Would you like to book?';\nelse if (faqTopic === 'services')     faqAnswer = 'We offer: ' + servicesList + '. Would you like to book one?';\nelse if (faqTopic === 'barbers')      faqAnswer = 'Our barbers are ' + shop.barbers.join(', ') + '. You can ask for any of them when you book.';\nelse if (faqTopic === 'payment')      faqAnswer = shop.payment;\nelse if (faqTopic === 'cancellation') faqAnswer = shop.cancellation;\nelse faqAnswer = 'We are ' + shop.name + '. We do haircuts, fades, beards and shaves. I can tell you our prices, hours or location, or take your number for a callback.';\n\nconst hoursText    = 'We are open ' + shop.hoursText + '.';\nconst locationText = 'We are at ' + shop.address + '. ' + shop.parking + '.';\nconst humanText    = callbackNumber ? ('Thanks. Someone from ' + shop.name + ' will call you back on ' + callbackNumber + ' shortly.') : 'No problem, I can arrange a callback. What is the best number to reach you on?';\nconst comingSoonText = 'Booking through me is being set up right now. For the moment I can give you our prices, opening hours or location, or take your number for a callback. Which would you like?';\n\nreturn [{ json: {\n  route, valid, errors, intent: intentRaw, faqTopic, toolCallId, callbackNumber, shop,\n  hoursText, locationText, faqAnswer, humanText, comingSoonText,\n  customerName, phone, email, notes, confirmCancel,\n  serviceTypeRaw, serviceName, servicePrice, durationMinutes,\n  preferredBarber, preferredDate, preferredTime, dayOfWeek, dateLabel,\n  withinHours, startISO, endISO,\n  raw: b\n} }];\n"
+      },
+      "id": "0baecdee-295a-4b2a-8960-18e6b239e3fb",
+      "name": "Normalize + Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -848,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "651b43e0-6d3e-46ef-a23c-d4befec66713",
+      "name": "Valid Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -560,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "shop_hours"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "shop_location"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "faq"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "request_human"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "book_appointment"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "check_availability"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "lookup_appointment"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "reschedule_appointment"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "cancel_appointment"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "walk_in_today"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Coming Soon"
+        }
+      },
+      "id": "bdfa5f6f-3352-481c-8191-6fd2a357d11c",
+      "name": "Intent Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -288,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'ok', intent: 'shop_hours', message: $json.hoursText } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "5d98cf95-79a2-40c4-89aa-40b002b2aab8",
+      "name": "Respond - Shop Hours",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        48,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'ok', intent: 'shop_location', message: $json.locationText } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "095c3eb3-ea9f-4e31-b134-689e8063b6fb",
+      "name": "Respond - Shop Location",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -128,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'ok', intent: 'faq', topic: $json.faqTopic, message: $json.faqAnswer } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "3c48759c-85ff-496e-ba7a-f708687c4b4d",
+      "name": "Respond - FAQ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        48,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'human_handoff', message: $json.humanText, callback_number: $json.callbackNumber } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "d5587c53-2404-4ffe-8fd3-ad9b62843fe7",
+      "name": "Respond - Human Handoff",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        48,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "within-hours",
+              "leftValue": "={{ $json.withinHours }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2c4400e9-9731-4232-99ad-d6336cb99f08",
+      "name": "Inside Shop Hours?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        48,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "theskyweb.uk@gmail.com",
+          "mode": "list",
+          "cachedResultName": "theskyweb.uk@gmail.com"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $json.preferredDate }}T00:00:00",
+        "timeMax": "={{ $json.preferredDate }}T23:59:59",
+        "options": {}
+      },
+      "id": "7edc8c2f-2d54-4685-acd1-894f39e9fe50",
+      "name": "Get Events For Day",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        320,
+        800
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction emailWrap(shopObj, content) {\n  const s = shopObj || {};\n  const addr = s.address || '12 High Street, Manchester, M1 2AB';\n  const phone = s.phone || '0161 123 4567';\n  return '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head>' +\n    '<body style=\"margin:0;padding:0;background:#f0f0f0;font-family:Arial,Helvetica,sans-serif;\">' +\n    '<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f0f0f0;padding:24px 0;\"><tr><td align=\"center\">' +\n    '<table cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;width:100%;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.12);\">' +\n    '<tr><td style=\"background:#111;padding:24px 40px;text-align:center;\">' +\n    '<img src=\"https://theskyweb-portfolio.vercel.app/assets/skyweb-logo-network-CqQKEOUL.png\" alt=\"SkyWeb Barbers Co\" style=\"max-width:100px;height:auto;display:block;margin:0 auto 10px;\" />' +\n    '<p style=\"margin:0;color:#ffffff;font-size:18px;font-weight:bold;letter-spacing:1px;\">SkyWeb Barbers Co</p>' +\n    '</td></tr>' +\n    '<tr><td style=\"background:#c9a96e;height:4px;line-height:4px;font-size:0;\">&nbsp;</td></tr>' +\n    '<tr><td style=\"padding:36px 40px;color:#333;font-size:15px;line-height:1.7;\">' +\n    content +\n    '</td></tr>' +\n    '<tr><td style=\"background:#111;padding:22px 40px;text-align:center;\">' +\n    '<p style=\"margin:0 0 6px;color:#c9a96e;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;\">SkyWeb Barbers Co</p>' +\n    '<p style=\"margin:0 0 4px;color:#888;font-size:12px;\">' + addr + '</p>' +\n    '<p style=\"margin:0;color:#888;font-size:12px;\">' + phone + '</p>' +\n    '</td></tr>' +\n    '</table></td></tr></table></body></html>';\n}\nfunction infoRow(label, value) {\n  return '<tr>' +\n    '<td style=\"padding:9px 14px;background:#f8f8f8;color:#777;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;width:36%;border-bottom:1px solid #eee;\">' + label + '</td>' +\n    '<td style=\"padding:9px 14px;color:#222;font-size:14px;border-bottom:1px solid #eee;\">' + value + '</td>' +\n    '</tr>';\n}\nfunction infoTable(rows) {\n  return '<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border:1px solid #eee;border-radius:6px;overflow:hidden;margin:18px 0;\">' + rows + '</table>';\n}\nfunction h2(title, sub) {\n  return '<h2 style=\"color:#111;font-size:22px;margin:0 0 6px;font-weight:bold;\">' + title + '</h2>' +\n    (sub ? '<p style=\"color:#c9a96e;font-size:13px;font-weight:bold;margin:0 0 22px;text-transform:uppercase;letter-spacing:.5px;\">' + sub + '</p>' : '<div style=\"margin-bottom:22px;\"></div>');\n}\nfunction divider() { return '<hr style=\"border:none;border-top:1px solid #eee;margin:22px 0;\" />'; }\nfunction note(text) { return '<p style=\"color:#888;font-size:13px;margin:0;\">' + text + '</p>'; }\n\nconst p = $('Normalize + Validate Request').item.json;\nconst events = $input.all().map(i => i.json);\nconst shop = p.shop;\nconst barbers = shop.barbers;\n\nconst startDt = DateTime.fromISO(p.startISO).setZone(shop.timezone);\nconst endDt = DateTime.fromISO(p.endISO).setZone(shop.timezone);\n\nfunction parseBarberFromEvent(ev) {\n  const desc = String(ev.description || '');\n  const m = desc.match(/Barber:\\s*([A-Za-z]+)/i);\n  if (m) return m[1];\n  const summary = String(ev.summary || '');\n  const m2 = summary.match(/^([A-Za-z]+)\\s*[-:]/);\n  return m2 ? m2[1] : '';\n}\n\nfunction overlaps(evStartISO, evEndISO) {\n  if (!evStartISO || !evEndISO) return false;\n  const evStart = DateTime.fromISO(evStartISO);\n  const evEnd = DateTime.fromISO(evEndISO);\n  return startDt < evEnd && endDt > evStart;\n}\n\nconst offToday = {};\nbarbers.forEach(b => { offToday[b] = false; });\nevents.forEach(ev => {\n  const summary = String(ev.summary || '');\n  const m = summary.match(/^DAY OFF:\\s*([A-Za-z]+)/i);\n  if (m) {\n    const offBarber = barbers.find(b => b.toLowerCase() === m[1].toLowerCase());\n    if (offBarber) offToday[offBarber] = true;\n  }\n});\n\nconst busyByBarber = {};\nbarbers.forEach(b => { busyByBarber[b] = !!offToday[b]; });\nlet possibleDuplicate = false;\n\nevents.forEach(ev => {\n  const evStart = ev.start && ev.start.dateTime;\n  const evEnd = ev.end && ev.end.dateTime;\n  if (!overlaps(evStart, evEnd)) return;\n  const evBarber = parseBarberFromEvent(ev);\n  if (evBarber && busyByBarber.hasOwnProperty(evBarber)) {\n    busyByBarber[evBarber] = true;\n  } else if (!evBarber) {\n    barbers.forEach(b => { busyByBarber[b] = true; });\n  }\n  const evCustomerPhone = String(ev.description || '').match(/Phone:\\s*([0-9+ ]+)/i);\n  if (p.phone && evCustomerPhone && evCustomerPhone[1].trim() === p.phone) {\n    possibleDuplicate = true;\n  }\n});\n\nlet assignedBarber = '';\nlet available = false;\n\nif (p.preferredBarber) {\n  const wanted = barbers.find(b => b.toLowerCase() === p.preferredBarber.toLowerCase());\n  if (wanted) {\n    available = !busyByBarber[wanted];\n    assignedBarber = wanted;\n  } else {\n    available = false;\n  }\n} else {\n  const freeBarber = barbers.find(b => !busyByBarber[b]);\n  if (freeBarber) {\n    available = true;\n    assignedBarber = freeBarber;\n  }\n}\n\nconst alternatives = [];\nif (!available) {\n  const stepMinutes = 15;\n  const dayHours = shop.openHours[p.dayOfWeek];\n  if (dayHours) {\n    let cursor = DateTime.fromISO(p.preferredDate + 'T' + dayHours[0], { zone: shop.timezone });\n    const closeDt = DateTime.fromISO(p.preferredDate + 'T' + dayHours[1], { zone: shop.timezone });\n    while (cursor.plus({ minutes: p.durationMinutes }) <= closeDt && alternatives.length < 3) {\n      const cEnd = cursor.plus({ minutes: p.durationMinutes });\n      const isBusy = events.some(ev => {\n        const evStart = ev.start && ev.start.dateTime;\n        const evEnd = ev.end && ev.end.dateTime;\n        if (!evStart || !evEnd) return false;\n        const evS = DateTime.fromISO(evStart);\n        const evE = DateTime.fromISO(evEnd);\n        const evBarber = parseBarberFromEvent(ev);\n        const blocksPreferred = p.preferredBarber ? (evBarber.toLowerCase() === p.preferredBarber.toLowerCase() || !evBarber) : true;\n        return blocksPreferred && (cursor < evE && cEnd > evS);\n      });\n      const preferredOff = p.preferredBarber && offToday[barbers.find(b => b.toLowerCase() === p.preferredBarber.toLowerCase())];\n      if (!isBusy && !preferredOff && (cursor.toISO() !== startDt.toISO())) {\n        alternatives.push(cursor.toFormat('h:mm a'));\n      }\n      cursor = cursor.plus({ minutes: stepMinutes });\n    }\n  }\n}\n\nconst barberEmail = shop.barberEmails && shop.barberEmails[assignedBarber] ? shop.barberEmails[assignedBarber] : '';\nconst timeStr = startDt.toFormat('h:mm a');\n\nconst customerEmailSubject = 'Booking Confirmed - ' + shop.name;\nconst customerEmailHtml = emailWrap(shop,\n  h2('Booking Confirmed', 'Your appointment is all set') +\n  '<p style=\"margin:0 0 16px;\">Hi <strong>' + p.customerName + '</strong>,</p>' +\n  '<p style=\"margin:0 0 4px;\">Thank you for choosing <strong>' + shop.name + '</strong>. Here are your appointment details:</p>' +\n  infoTable(\n    infoRow('Service', p.serviceName + ' &nbsp;<span style=\"color:#c9a96e;font-size:12px;\">(' + p.servicePrice + ')</span>') +\n    infoRow('Barber', assignedBarber) +\n    infoRow('Date', p.dateLabel) +\n    infoRow('Time', timeStr)\n  ) +\n  '<p style=\"margin:0 0 6px;\"><strong>Location</strong></p>' +\n  '<p style=\"margin:0 0 4px;color:#555;\">' + shop.address + '</p>' +\n  '<p style=\"margin:0 0 20px;color:#888;font-size:13px;\">' + shop.parking + '</p>' +\n  divider() +\n  note(shop.cancellation) +\n  '<p style=\"margin:22px 0 0;color:#333;\">See you soon,<br><strong>The ' + shop.name + ' Team</strong></p>'\n);\n\nconst shopEmailSubject = 'New Booking: ' + p.customerName + ' with ' + assignedBarber;\nconst shopEmailHtml = emailWrap(shop,\n  h2('New Booking', 'A new appointment has been made') +\n  infoTable(\n    infoRow('Customer', p.customerName) +\n    infoRow('Phone', p.phone) +\n    infoRow('Email', p.email || 'not given') +\n    infoRow('Service', p.serviceName + ' (' + p.servicePrice + ')') +\n    infoRow('Barber', assignedBarber) +\n    infoRow('Date', p.dateLabel) +\n    infoRow('Time', timeStr) +\n    infoRow('Notes', p.notes || 'none')\n  )\n);\n\nconst barberEmailSubject = 'New Booking Assigned to You: ' + p.customerName;\nconst barberEmailHtml = emailWrap(shop,\n  h2('New Appointment', 'You have a new booking') +\n  '<p style=\"margin:0 0 16px;\">Hi <strong>' + assignedBarber + '</strong>,</p>' +\n  '<p style=\"margin:0 0 4px;\">A new appointment has been added to your schedule:</p>' +\n  infoTable(\n    infoRow('Customer', p.customerName) +\n    infoRow('Phone', p.phone) +\n    infoRow('Service', p.serviceName + ' (' + p.servicePrice + ')') +\n    infoRow('Date', p.dateLabel) +\n    infoRow('Time', timeStr) +\n    infoRow('Notes', p.notes || 'none')\n  )\n);\n\nconst eventSummary = assignedBarber + ' - ' + p.serviceName + ' - ' + p.customerName;\nconst eventDescription =\n  'Barber: ' + assignedBarber + '\\n' +\n  'Service: ' + p.serviceName + '\\n' +\n  'Customer: ' + p.customerName + '\\n' +\n  'Phone: ' + p.phone + '\\n' +\n  'Email: ' + p.email + '\\n' +\n  'Notes: ' + (p.notes || 'none');\n\nreturn [{ json: Object.assign({}, p, {\n  assignedBarber, barberEmail, available, possibleDuplicate, alternatives,\n  customerEmailSubject, customerEmailHtml,\n  shopEmailSubject, shopEmailHtml,\n  barberEmailSubject, barberEmailHtml,\n  eventSummary, eventDescription,\n  startTimeLabel: timeStr\n}) }];\n"
+      },
+      "id": "2b56bfd0-c27a-4a6c-835f-ae1231b8b069",
+      "name": "Check Slot + Alternatives",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-available",
+              "leftValue": "={{ $json.available }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "83ac5b80-f5ad-4bf7-845b-fecc7b901b1a",
+      "name": "Slot Available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-booking",
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "book_appointment",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ce91d4f1-d4eb-4010-ab02-344397106276",
+      "name": "Booking Intent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1168,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-dup",
+              "leftValue": "={{ $json.possibleDuplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f64aa670-a0b0-4551-8c49-5212db2646d7",
+      "name": "Duplicate Booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1440,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'possible_duplicate', message: 'It looks like you may already have a booking with us around that time. Would you like to book this anyway, or should I check your existing appointment instead?' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "c19bf13b-affe-4a03-967f-b5dad115a4ce",
+      "name": "Respond - Possible Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1728,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "calendar",
+        "calendar": {
+          "__rl": true,
+          "mode": "list",
+          "value": "primary",
+          "cachedResultName": "SkyWeb Barber Shop Calendar"
+        },
+        "options": {}
+      },
+      "id": "7699c490-8808-47be-9cd6-2a63805445d2",
+      "name": "Create Appointment",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        2304,
+        1184
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'booked', message: 'All booked in. ' + $('Check Slot + Alternatives').item.json.customerName + ', you are confirmed with ' + $('Check Slot + Alternatives').item.json.assignedBarber + ' for a ' + $('Check Slot + Alternatives').item.json.serviceName + ' on ' + $('Check Slot + Alternatives').item.json.dateLabel + ' at ' + $('Check Slot + Alternatives').item.json.startTimeLabel + '. A confirmation email is on its way.', barber: $('Check Slot + Alternatives').item.json.assignedBarber } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a7711e57-3f78-42d8-9e7d-6c6aac59955f",
+      "name": "Respond - Booked",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2864,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Check Slot + Alternatives').item.json.email }}",
+        "subject": "={{ $('Check Slot + Alternatives').item.json.customerEmailSubject }}",
+        "message": "={{ $('Check Slot + Alternatives').item.json.customerEmailHtml }}",
+        "options": {}
+      },
+      "id": "eccf2d51-f0b5-489d-8bc8-2363b81518a9",
+      "name": "Email - Customer Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2864,
+        1200
+      ],
+      "webhookId": "7b07dd02-c3c4-4e26-8a03-150edc92df16",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Check Slot + Alternatives').item.json.shop.shopEmail }}",
+        "subject": "={{ $('Check Slot + Alternatives').item.json.shopEmailSubject }}",
+        "message": "={{ $('Check Slot + Alternatives').item.json.shopEmailHtml }}",
+        "options": {}
+      },
+      "id": "33531bae-d967-4dd4-a5da-56bae0b4016b",
+      "name": "Email - Notify Shop",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3152,
+        1200
+      ],
+      "webhookId": "d9f79d34-1818-4155-a1be-981a48f9db77",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'available', message: $json.assignedBarber + ' is free at ' + $json.startTimeLabel + ' on ' + $json.dateLabel + ' for a ' + $json.serviceName + '. Would you like me to book it?', barber: $json.assignedBarber } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b3819cdd-aec1-4088-acb8-d237df86602c",
+      "name": "Respond - Availability",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1440,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'unavailable', message: (($json.preferredBarber ? $json.preferredBarber : 'That barber') + ' is not free at that time.') + ($json.alternatives && $json.alternatives.length ? (' Nearby times available: ' + $json.alternatives.join(', ') + '.') : ' No nearby times were free that day.'), alternatives: $json.alternatives } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "3ef86201-6114-4a26-8513-2d4a8b60687c",
+      "name": "Respond - Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'outside_hours', message: 'That time is outside our opening hours. We are open ' + $json.shop.hoursText + '. Would another time work?' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "67d75d7d-a8cd-4f1b-9c16-7b534f7149cc",
+      "name": "Respond - Outside Hours",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        320,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'coming_soon', intent: $json.intent, message: $json.comingSoonText } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "009b78da-4dc1-4f32-8aea-566c9aa9014b",
+      "name": "Respond - Coming Soon",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        48,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'missing_information', message: 'Before I can do that I need ' + $json.errors.join(', ') + '.', missing_fields: $json.errors } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "94bda120-21bb-417e-871c-12f6e790e675",
+      "name": "Respond - Missing Info",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -576,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Phase 0 — Entry & Routing\nVapi POSTs to the webhook. Live shop data (services, prices, hours, barbers) is fetched from Supabase on every call via RPC. Normalize + Validate extracts the intent from the Vapi tool-call payload and routes to the correct phase.",
+        "height": 148,
+        "width": 380,
+        "color": 4
+      },
+      "id": "4a5e7a01-40b9-4a67-a390-7f99a808802b",
+      "name": "Sticky — Phase 0",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Phase 1 — Shop Info & FAQ\nRead-only responses, no calendar access needed.\nHandles: opening hours, location & parking, service prices, barber list, payment methods, cancellation policy, and human handoff requests.",
+        "height": 140,
+        "width": 340,
+        "color": 5
+      },
+      "id": "b3f042c2-a9dd-4f90-b625-536e8e29f6ba",
+      "name": "Sticky — Phase 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Phase 2 — Availability & Booking\nMulti-barber slot engine: fetches Google Calendar events for the day and finds a free barber. Suggests 3 alternative times in 15-min steps if the slot is taken. Phone-number duplicate check prevents repeat bookings.\n\nDouble-booking guard (below): Supabase is queried before any calendar event is created — race-condition protection.\n\nOn success: Google Calendar event created → synced to Supabase → confirmation emails sent to customer, shop & barber.",
+        "height": 220,
+        "width": 420,
+        "color": 6
+      },
+      "id": "495024ce-b880-4f3b-bfc5-8a4b574b7b45",
+      "name": "Sticky — Phase 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -384,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "faizanshahzad2002@gmail.com",
+          "mode": "list",
+          "cachedResultName": "faizanshahzad2002@gmail.com"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.toISO() }}",
+        "timeMax": "={{ $now.plus({ days: 60 }).toISO() }}",
+        "options": {}
+      },
+      "id": "ba61b12d-f4ea-4b16-9ae8-a5d16718e40c",
+      "name": "Search Events By Phone",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        320,
+        1424
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Normalize + Validate Request').item.json;\nconst events = $input.all().map(i => i.json);\nconst shop = p.shop;\n\nfunction parseField(desc, label) {\n  const re = new RegExp(label + ':\\\\s*([^\\\\n]+)', 'i');\n  const m = String(desc || '').match(re);\n  return m ? m[1].trim() : '';\n}\n\nconst now = DateTime.now().setZone(shop.timezone);\n\nconst matches = events\n  .filter(ev => {\n    const desc = String(ev.description || '');\n    const phoneInEvent = parseField(desc, 'Phone');\n    return phoneInEvent && p.phone && phoneInEvent.replace(/\\s+/g, '') === p.phone.replace(/\\s+/g, '');\n  })\n  .map(ev => {\n    const desc = String(ev.description || '');\n    const startDt = ev.start && ev.start.dateTime ? DateTime.fromISO(ev.start.dateTime).setZone(shop.timezone) : null;\n    return {\n      eventId: ev.id,\n      barber: parseField(desc, 'Barber'),\n      service: parseField(desc, 'Service'),\n      customerName: parseField(desc, 'Customer'),\n      startDt,\n      startISO: ev.start && ev.start.dateTime,\n      endISO: ev.end && ev.end.dateTime,\n      dateLabel: startDt ? startDt.toFormat('cccc d LLLL') : '',\n      timeLabel: startDt ? startDt.toFormat('h:mm a') : '',\n      isPast: startDt ? startDt < now : false\n    };\n  })\n  .filter(m => !m.isPast)\n  .sort((a, b) => (a.startDt && b.startDt ? a.startDt - b.startDt : 0));\n\nconst found = matches.length > 0;\nconst next = found ? matches[0] : null;\n\nlet message = '';\nif (!found) {\n  message = \"I couldn't find an upcoming appointment under that phone number. Would you like to book one, or try a different number?\";\n} else if (matches.length === 1) {\n  message = 'You have a ' + next.service + ' booked with ' + next.barber + ' on ' + next.dateLabel + ' at ' + next.timeLabel + '.';\n} else {\n  message = 'You have ' + matches.length + ' upcoming appointments. The next one is a ' + next.service + ' with ' + next.barber + ' on ' + next.dateLabel + ' at ' + next.timeLabel + '.';\n}\n\nreturn [{ json: Object.assign({}, p, {\n  found,\n  matchCount: matches.length,\n  nextBooking: next,\n  allBookings: matches,\n  lookupMessage: message\n}) }];\n"
+      },
+      "id": "caa49419-1317-4f49-957e-fdbf7142e20a",
+      "name": "Find My Booking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-found",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b91c9339-9c79-48c2-b3a0-068df9c447bb",
+      "name": "Found Booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'booking_found', message: $json.lookupMessage, match_count: $json.matchCount, next_booking: $json.nextBooking } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "7e87d99a-e7c1-474d-80cc-27fdbacec722",
+      "name": "Respond - Booking Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        1344
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'booking_not_found', message: $json.lookupMessage } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "239a2bea-5038-4418-842a-63bbbdc415a7",
+      "name": "Respond - No Booking Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Phase 3 — Booking Lookup\nCaller gives their phone number. We search the shared Google Calendar for upcoming events whose description contains a matching 'Phone:' line and report the next one.",
+        "height": 130,
+        "width": 320,
+        "color": 7
+      },
+      "id": "5d50521f-1f94-4023-9314-06d1fe9faeca",
+      "name": "Sticky Note Phase 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        256,
+        1280
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.toISO() }}",
+        "timeMax": "={{ $now.plus({ days: 60 }).toISO() }}",
+        "options": {}
+      },
+      "id": "138f6774-db7b-44f1-8051-2c8d21b88c4b",
+      "name": "Search Booking To Reschedule",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        320,
+        1824
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Normalize + Validate Request').item.json;\nconst events = $input.all().map(i => i.json);\nconst shop = p.shop;\n\nfunction parseField(desc, label) {\n  const re = new RegExp(label + ':\\\\s*([^\\\\n]+)', 'i');\n  const m = String(desc || '').match(re);\n  return m ? m[1].trim() : '';\n}\n\nconst now = DateTime.now().setZone(shop.timezone);\n\nconst matches = events\n  .filter(ev => {\n    const desc = String(ev.description || '');\n    const phoneInEvent = parseField(desc, 'Phone');\n    return phoneInEvent && p.phone && phoneInEvent.replace(/\\s+/g, '') === p.phone.replace(/\\s+/g, '');\n  })\n  .map(ev => {\n    const desc = String(ev.description || '');\n    const startDt = ev.start && ev.start.dateTime ? DateTime.fromISO(ev.start.dateTime).setZone(shop.timezone) : null;\n    return {\n      eventId: ev.id,\n      barber: parseField(desc, 'Barber'),\n      service: parseField(desc, 'Service'),\n      customerName: parseField(desc, 'Customer'),\n      startDt,\n      startISO: ev.start && ev.start.dateTime,\n      endISO: ev.end && ev.end.dateTime,\n      dateLabel: startDt ? startDt.toFormat('cccc d LLLL') : '',\n      timeLabel: startDt ? startDt.toFormat('h:mm a') : '',\n      isPast: startDt ? startDt < now : false\n    };\n  })\n  .filter(m => !m.isPast)\n  .sort((a, b) => (a.startDt && b.startDt ? a.startDt - b.startDt : 0));\n\nconst found = matches.length > 0;\nconst next = found ? matches[0] : null;\n\nreturn [{ json: Object.assign({}, p, {\n  found,\n  matchCount: matches.length,\n  nextBooking: next,\n  allBookings: matches\n}) }];\n"
+      },
+      "id": "a960c05f-eb0f-4d1d-9691-87970de946e9",
+      "name": "Find Booking To Reschedule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "has-booking",
+              "leftValue": "={{ $json.found }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "ceac12de-d1c7-45fa-8c80-67629aeb63a6",
+      "name": "Has Existing Booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'booking_not_found', message: \"I couldn't find an upcoming appointment under that phone number to reschedule. Would you like to make a new booking instead?\" } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "eb4b2f7b-96d6-4f31-8f76-72f35bbfb156",
+      "name": "Respond - Nothing To Reschedule",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        1936
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $json.preferredDate }}T00:00:00",
+        "timeMax": "={{ $json.preferredDate }}T23:59:59",
+        "options": {}
+      },
+      "id": "c7cd683e-8cca-4443-877e-80baca233d6f",
+      "name": "Get Events For New Day",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1168,
+        1744
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction emailWrap(shopObj, content) {\n  const s = shopObj || {};\n  const addr = s.address || '12 High Street, Manchester, M1 2AB';\n  const phone = s.phone || '0161 123 4567';\n  return '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head>' +\n    '<body style=\"margin:0;padding:0;background:#f0f0f0;font-family:Arial,Helvetica,sans-serif;\">' +\n    '<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f0f0f0;padding:24px 0;\"><tr><td align=\"center\">' +\n    '<table cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;width:100%;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.12);\">' +\n    '<tr><td style=\"background:#111;padding:24px 40px;text-align:center;\">' +\n    '<img src=\"https://theskyweb-portfolio.vercel.app/assets/skyweb-logo-network-CqQKEOUL.png\" alt=\"SkyWeb Barbers Co\" style=\"max-width:100px;height:auto;display:block;margin:0 auto 10px;\" />' +\n    '<p style=\"margin:0;color:#ffffff;font-size:18px;font-weight:bold;letter-spacing:1px;\">SkyWeb Barbers Co</p>' +\n    '</td></tr>' +\n    '<tr><td style=\"background:#c9a96e;height:4px;line-height:4px;font-size:0;\">&nbsp;</td></tr>' +\n    '<tr><td style=\"padding:36px 40px;color:#333;font-size:15px;line-height:1.7;\">' +\n    content +\n    '</td></tr>' +\n    '<tr><td style=\"background:#111;padding:22px 40px;text-align:center;\">' +\n    '<p style=\"margin:0 0 6px;color:#c9a96e;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;\">SkyWeb Barbers Co</p>' +\n    '<p style=\"margin:0 0 4px;color:#888;font-size:12px;\">' + addr + '</p>' +\n    '<p style=\"margin:0;color:#888;font-size:12px;\">' + phone + '</p>' +\n    '</td></tr>' +\n    '</table></td></tr></table></body></html>';\n}\nfunction infoRow(label, value) {\n  return '<tr>' +\n    '<td style=\"padding:9px 14px;background:#f8f8f8;color:#777;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;width:36%;border-bottom:1px solid #eee;\">' + label + '</td>' +\n    '<td style=\"padding:9px 14px;color:#222;font-size:14px;border-bottom:1px solid #eee;\">' + value + '</td>' +\n    '</tr>';\n}\nfunction infoTable(rows) {\n  return '<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border:1px solid #eee;border-radius:6px;overflow:hidden;margin:18px 0;\">' + rows + '</table>';\n}\nfunction h2(title, sub) {\n  return '<h2 style=\"color:#111;font-size:22px;margin:0 0 6px;font-weight:bold;\">' + title + '</h2>' +\n    (sub ? '<p style=\"color:#c9a96e;font-size:13px;font-weight:bold;margin:0 0 22px;text-transform:uppercase;letter-spacing:.5px;\">' + sub + '</p>' : '<div style=\"margin-bottom:22px;\"></div>');\n}\nfunction divider() { return '<hr style=\"border:none;border-top:1px solid #eee;margin:22px 0;\" />'; }\nfunction note(text) { return '<p style=\"color:#888;font-size:13px;margin:0;\">' + text + '</p>'; }\n\nconst p = $('Normalize + Validate Request').item.json;\nconst lookup = $('Find Booking To Reschedule').item.json;\nconst events = $input.all().map(i => i.json);\nconst shop = p.shop;\nconst barbers = shop.barbers;\nconst existingEventId = lookup.nextBooking ? lookup.nextBooking.eventId : '';\n\nconst startDt = DateTime.fromISO(p.startISO).setZone(shop.timezone);\nconst endDt = DateTime.fromISO(p.endISO).setZone(shop.timezone);\n\nfunction parseBarberFromEvent(ev) {\n  const desc = String(ev.description || '');\n  const m = desc.match(/Barber:\\s*([A-Za-z]+)/i);\n  if (m) return m[1];\n  const summary = String(ev.summary || '');\n  const m2 = summary.match(/^([A-Za-z]+)\\s*[-:]/);\n  return m2 ? m2[1] : '';\n}\n\nfunction overlaps(evStartISO, evEndISO) {\n  if (!evStartISO || !evEndISO) return false;\n  const evStart = DateTime.fromISO(evStartISO);\n  const evEnd = DateTime.fromISO(evEndISO);\n  return startDt < evEnd && endDt > evStart;\n}\n\nconst otherEvents = events.filter(ev => ev.id !== existingEventId);\nconst busyByBarber = {};\nbarbers.forEach(b => { busyByBarber[b] = false; });\notherEvents.forEach(ev => {\n  const evStart = ev.start && ev.start.dateTime;\n  const evEnd = ev.end && ev.end.dateTime;\n  if (!overlaps(evStart, evEnd)) return;\n  const evBarber = parseBarberFromEvent(ev);\n  if (evBarber && busyByBarber.hasOwnProperty(evBarber)) {\n    busyByBarber[evBarber] = true;\n  } else if (!evBarber) {\n    barbers.forEach(b => { busyByBarber[b] = true; });\n  }\n});\n\nconst preferredBarberForReschedule = p.preferredBarber || lookup.nextBooking.barber;\nlet assignedBarber = '';\nlet available = false;\n\nif (preferredBarberForReschedule) {\n  const wanted = barbers.find(b => b.toLowerCase() === preferredBarberForReschedule.toLowerCase());\n  if (wanted) { available = !busyByBarber[wanted]; assignedBarber = wanted; }\n} else {\n  const freeBarber = barbers.find(b => !busyByBarber[b]);\n  if (freeBarber) { available = true; assignedBarber = freeBarber; }\n}\n\nconst alternatives = [];\nif (!available) {\n  const stepMinutes = 15;\n  const dayHours = shop.openHours[p.dayOfWeek];\n  if (dayHours) {\n    let cursor = DateTime.fromISO(p.preferredDate + 'T' + dayHours[0], { zone: shop.timezone });\n    const closeDt = DateTime.fromISO(p.preferredDate + 'T' + dayHours[1], { zone: shop.timezone });\n    while (cursor.plus({ minutes: p.durationMinutes }) <= closeDt && alternatives.length < 3) {\n      const cEnd = cursor.plus({ minutes: p.durationMinutes });\n      const isBusy = otherEvents.some(ev => {\n        const evStart = ev.start && ev.start.dateTime;\n        const evEnd = ev.end && ev.end.dateTime;\n        if (!evStart || !evEnd) return false;\n        const evS = DateTime.fromISO(evStart);\n        const evE = DateTime.fromISO(evEnd);\n        const evBarber = parseBarberFromEvent(ev);\n        const blocksPreferred = preferredBarberForReschedule ? (evBarber.toLowerCase() === preferredBarberForReschedule.toLowerCase() || !evBarber) : true;\n        return blocksPreferred && (cursor < evE && cEnd > evS);\n      });\n      if (!isBusy && (cursor.toISO() !== startDt.toISO())) alternatives.push(cursor.toFormat('h:mm a'));\n      cursor = cursor.plus({ minutes: stepMinutes });\n    }\n  }\n}\n\nconst serviceNameForUpdate = p.serviceName || lookup.nextBooking.service;\nconst customerNameForUpdate = lookup.nextBooking.customerName || p.customerName;\nconst barberEmail = shop.barberEmails && shop.barberEmails[assignedBarber] ? shop.barberEmails[assignedBarber] : '';\nconst newTimeStr = startDt.toFormat('h:mm a');\n\nconst updateEventSummary = assignedBarber + ' - ' + serviceNameForUpdate + ' - ' + customerNameForUpdate;\nconst updateEventDescription =\n  'Barber: ' + assignedBarber + '\\nService: ' + serviceNameForUpdate + '\\nCustomer: ' + customerNameForUpdate +\n  '\\nPhone: ' + p.phone + '\\nEmail: ' + (p.email || '') +\n  '\\nNotes: rescheduled from ' + lookup.nextBooking.dateLabel + ' ' + lookup.nextBooking.timeLabel;\n\nconst rescheduleEmailSubject = 'Appointment Rescheduled - ' + shop.name;\nconst rescheduleEmailHtml = emailWrap(shop,\n  h2('Appointment Rescheduled', 'Your updated booking details') +\n  '<p style=\"margin:0 0 16px;\">Hi <strong>' + customerNameForUpdate + '</strong>,</p>' +\n  '<p style=\"margin:0 0 4px;\">Your appointment at <strong>' + shop.name + '</strong> has been moved successfully.</p>' +\n  infoTable(\n    infoRow('Service', serviceNameForUpdate) +\n    infoRow('Barber', assignedBarber) +\n    infoRow('New Date', p.dateLabel) +\n    infoRow('New Time', newTimeStr) +\n    infoRow('Previous Slot', lookup.nextBooking.dateLabel + ', ' + lookup.nextBooking.timeLabel)\n  ) +\n  divider() +\n  note(shop.cancellation) +\n  '<p style=\"margin:22px 0 0;color:#333;\">See you soon,<br><strong>The ' + shop.name + ' Team</strong></p>'\n);\n\nconst barberEmailSubject = 'Booking Rescheduled: ' + customerNameForUpdate;\nconst barberEmailHtml = emailWrap(shop,\n  h2('Booking Rescheduled', 'A booking on your schedule has moved') +\n  '<p style=\"margin:0 0 16px;\">Hi <strong>' + assignedBarber + '</strong>,</p>' +\n  infoTable(\n    infoRow('Customer', customerNameForUpdate) +\n    infoRow('Service', serviceNameForUpdate) +\n    infoRow('Was', lookup.nextBooking.dateLabel + ', ' + lookup.nextBooking.timeLabel) +\n    infoRow('Now', p.dateLabel + ', ' + newTimeStr)\n  )\n);\n\nreturn [{ json: Object.assign({}, p, {\n  existingEventId, assignedBarber, barberEmail, available, alternatives,\n  serviceNameForUpdate, customerNameForUpdate, updateEventSummary, updateEventDescription,\n  rescheduleEmailSubject, rescheduleEmailHtml,\n  barberEmailSubject, barberEmailHtml,\n  oldDateLabel: lookup.nextBooking.dateLabel,\n  oldTimeLabel: lookup.nextBooking.timeLabel,\n  newTimeLabel: newTimeStr,\n  phone: p.phone, email: p.email || '',\n  preferredBarber: p.preferredBarber || lookup.nextBooking.barber\n}) }];\n"
+      },
+      "id": "26eb639d-9372-46ba-93cc-634008d90ff2",
+      "name": "Check Reschedule Slot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "new-slot-available",
+              "leftValue": "={{ $json.available }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "3e9fda66-4884-4eba-b18b-c75d0cf3e24c",
+      "name": "New Slot Available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1728,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'reschedule_unavailable', message: 'That new time is not free.' + ($json.alternatives && $json.alternatives.length ? (' Nearby times available: ' + $json.alternatives.join(', ') + '.') : ' No nearby times were free that day.'), alternatives: $json.alternatives } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "9da973a2-dc9e-4891-996d-565b109328e0",
+      "name": "Respond - Reschedule Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2016,
+        1856
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "eventId": "={{ $json.existingEventId }}",
+        "updateFields": {
+          "description": "={{ $json.updateEventDescription }}",
+          "end": "={{ $json.endISO }}",
+          "start": "={{ $json.startISO }}",
+          "summary": "={{ $json.updateEventSummary }}"
+        }
+      },
+      "id": "5f7766f4-b0e5-4481-a03b-9abb24665d82",
+      "name": "Update Appointment",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        2016,
+        1616
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'rescheduled', message: 'Done. I have moved your ' + $json.serviceNameForUpdate + ' from ' + $json.oldDateLabel + ' ' + $json.oldTimeLabel + ' to ' + $json.dateLabel + ' at ' + $json.newTimeLabel + ' with ' + $json.assignedBarber + '.', barber: $json.assignedBarber } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "fa77af0e-557b-46f2-a87b-822a5909d2e5",
+      "name": "Respond - Rescheduled",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2448,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ $json.rescheduleEmailSubject }}",
+        "message": "={{ $json.rescheduleEmailHtml }}",
+        "options": {}
+      },
+      "id": "e7a41263-e2d6-4aa4-878b-e51a957d601f",
+      "name": "Email - Reschedule Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2736,
+        1616
+      ],
+      "webhookId": "9c2c4fab-60f4-4d34-881d-15b1d26b93fc",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Phase 4 — Reschedule\nFinds the caller's booking by phone, then re-runs the multi-barber slot check for the new time — excluding the current event since it's about to move. If the new slot is free, the calendar event is updated in-place and a confirmation email is sent.",
+        "height": 155,
+        "width": 360,
+        "color": 3
+      },
+      "id": "38671cef-c6e2-494b-a018-2787b7c992e3",
+      "name": "Sticky Note Phase 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        256,
+        1696
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "reschedule-within-hours",
+              "leftValue": "={{ $json.withinHours }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "e129ee5e-71ba-4b7e-a672-96e67155e0eb",
+      "name": "Reschedule Inside Hours?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1168,
+        1904
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'outside_hours', message: 'That new time is outside our opening hours. We are open ' + $json.shop.hoursText + '. Would another time work?' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a6c5b9c8-ea8c-4815-bfc9-1d427f1ca24c",
+      "name": "Respond - Reschedule Outside Hours",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1440,
+        2048
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.toISO() }}",
+        "timeMax": "={{ $now.plus({ days: 60 }).toISO() }}",
+        "options": {}
+      },
+      "id": "34f0469e-331d-41cb-81d8-bc385671859b",
+      "name": "Search Booking To Cancel",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        320,
+        2224
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction emailWrap(shopObj, content) {\n  const s = shopObj || {};\n  const addr = s.address || '12 High Street, Manchester, M1 2AB';\n  const phone = s.phone || '0161 123 4567';\n  return '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head>' +\n    '<body style=\"margin:0;padding:0;background:#f0f0f0;font-family:Arial,Helvetica,sans-serif;\">' +\n    '<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f0f0f0;padding:24px 0;\"><tr><td align=\"center\">' +\n    '<table cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;width:100%;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.12);\">' +\n    '<tr><td style=\"background:#111;padding:24px 40px;text-align:center;\">' +\n    '<img src=\"https://theskyweb-portfolio.vercel.app/assets/skyweb-logo-network-CqQKEOUL.png\" alt=\"SkyWeb Barbers Co\" style=\"max-width:100px;height:auto;display:block;margin:0 auto 10px;\" />' +\n    '<p style=\"margin:0;color:#ffffff;font-size:18px;font-weight:bold;letter-spacing:1px;\">SkyWeb Barbers Co</p>' +\n    '</td></tr>' +\n    '<tr><td style=\"background:#c9a96e;height:4px;line-height:4px;font-size:0;\">&nbsp;</td></tr>' +\n    '<tr><td style=\"padding:36px 40px;color:#333;font-size:15px;line-height:1.7;\">' +\n    content +\n    '</td></tr>' +\n    '<tr><td style=\"background:#111;padding:22px 40px;text-align:center;\">' +\n    '<p style=\"margin:0 0 6px;color:#c9a96e;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;\">SkyWeb Barbers Co</p>' +\n    '<p style=\"margin:0 0 4px;color:#888;font-size:12px;\">' + addr + '</p>' +\n    '<p style=\"margin:0;color:#888;font-size:12px;\">' + phone + '</p>' +\n    '</td></tr>' +\n    '</table></td></tr></table></body></html>';\n}\nfunction infoRow(label, value) {\n  return '<tr>' +\n    '<td style=\"padding:9px 14px;background:#f8f8f8;color:#777;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;width:36%;border-bottom:1px solid #eee;\">' + label + '</td>' +\n    '<td style=\"padding:9px 14px;color:#222;font-size:14px;border-bottom:1px solid #eee;\">' + value + '</td>' +\n    '</tr>';\n}\nfunction infoTable(rows) {\n  return '<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border:1px solid #eee;border-radius:6px;overflow:hidden;margin:18px 0;\">' + rows + '</table>';\n}\nfunction h2(title, sub) {\n  return '<h2 style=\"color:#111;font-size:22px;margin:0 0 6px;font-weight:bold;\">' + title + '</h2>' +\n    (sub ? '<p style=\"color:#c9a96e;font-size:13px;font-weight:bold;margin:0 0 22px;text-transform:uppercase;letter-spacing:.5px;\">' + sub + '</p>' : '<div style=\"margin-bottom:22px;\"></div>');\n}\nfunction divider() { return '<hr style=\"border:none;border-top:1px solid #eee;margin:22px 0;\" />'; }\nfunction note(text) { return '<p style=\"color:#888;font-size:13px;margin:0;\">' + text + '</p>'; }\n\nconst p = $('Normalize + Validate Request').item.json;\nconst events = $input.all().map(i => i.json);\nconst shop = p.shop;\n\nfunction parseField(desc, label) {\n  const re = new RegExp(label + ':\\\\s*([^\\\\n]+)', 'i');\n  const m = String(desc || '').match(re);\n  return m ? m[1].trim() : '';\n}\n\nconst now = DateTime.now().setZone(shop.timezone);\nconst matches = events\n  .filter(ev => {\n    const desc = String(ev.description || '');\n    const phoneInEvent = parseField(desc, 'Phone');\n    return phoneInEvent && p.phone && phoneInEvent.replace(/\\s+/g, '') === p.phone.replace(/\\s+/g, '');\n  })\n  .map(ev => {\n    const desc = String(ev.description || '');\n    const startDt = ev.start && ev.start.dateTime ? DateTime.fromISO(ev.start.dateTime).setZone(shop.timezone) : null;\n    return {\n      eventId: ev.id,\n      barber: parseField(desc, 'Barber'),\n      service: parseField(desc, 'Service'),\n      customerName: parseField(desc, 'Customer'),\n      startDt,\n      startISO: ev.start && ev.start.dateTime,\n      endISO: ev.end && ev.end.dateTime,\n      dateLabel: startDt ? startDt.toFormat('cccc d LLLL') : '',\n      timeLabel: startDt ? startDt.toFormat('h:mm a') : '',\n      isPast: startDt ? startDt < now : false\n    };\n  })\n  .filter(m => !m.isPast)\n  .sort((a, b) => (a.startDt && b.startDt ? a.startDt - b.startDt : 0));\n\nconst found = matches.length > 0;\nconst next = found ? matches[0] : null;\n\nlet cancelEmailSubject = '', cancelEmailHtml = '';\nlet barberCancelEmail = '', barberCancelEmailSubject = '', barberCancelEmailHtml = '';\n\nif (next) {\n  cancelEmailSubject = 'Appointment Cancelled - ' + shop.name;\n  cancelEmailHtml = emailWrap(shop,\n    h2('Appointment Cancelled', 'We have received your cancellation') +\n    '<p style=\"margin:0 0 16px;\">Hi <strong>' + next.customerName + '</strong>,</p>' +\n    '<p style=\"margin:0 0 4px;\">Your appointment at <strong>' + shop.name + '</strong> has been cancelled.</p>' +\n    infoTable(\n      infoRow('Service', next.service) +\n      infoRow('Barber', next.barber) +\n      infoRow('Date', next.dateLabel) +\n      infoRow('Time', next.timeLabel)\n    ) +\n    '<p style=\"margin:0 0 20px;color:#555;\">We hope to see you again soon. To book a new appointment, call us or speak with our AI receptionist.</p>' +\n    divider() +\n    note('Cancelled by mistake? Call us on ' + (shop.phone || '0161 123 4567') + ' and we will get you rebooked.') +\n    '<p style=\"margin:22px 0 0;color:#333;\">Best regards,<br><strong>The ' + shop.name + ' Team</strong></p>'\n  );\n\n  barberCancelEmail = shop.barberEmails && shop.barberEmails[next.barber] ? shop.barberEmails[next.barber] : '';\n  barberCancelEmailSubject = 'Booking Cancelled: ' + next.customerName + ' (' + next.dateLabel + ')';\n  barberCancelEmailHtml = emailWrap(shop,\n    h2('Booking Cancelled', 'A booking has been removed from your schedule') +\n    '<p style=\"margin:0 0 16px;\">Hi <strong>' + next.barber + '</strong>,</p>' +\n    infoTable(\n      infoRow('Customer', next.customerName) +\n      infoRow('Service', next.service) +\n      infoRow('Was', next.dateLabel + ', ' + next.timeLabel)\n    ) +\n    '<p style=\"margin:16px 0 0;color:#555;\">This slot is now free for new bookings.</p>'\n  );\n}\n\nreturn [{ json: Object.assign({}, p, {\n  found, matchCount: matches.length, nextBooking: next, allBookings: matches,\n  cancelEmailSubject, cancelEmailHtml,\n  barberCancelEmail, barberCancelEmailSubject, barberCancelEmailHtml\n}) }];\n"
+      },
+      "id": "a94301a4-7614-495d-b933-c15ca48b57df",
+      "name": "Find Booking To Cancel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        2224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "has-cancel-booking",
+              "leftValue": "={{ $json.found }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "7de4cbf6-7825-4547-b506-11f18e3cdfb5",
+      "name": "Has Booking To Cancel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        2224
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'booking_not_found', message: \"I couldn't find an upcoming appointment under that phone number to cancel.\" } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "047ae77b-c4eb-4b70-a2d2-b83121dc75d0",
+      "name": "Respond - Nothing To Cancel",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        2336
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "is-confirm",
+              "leftValue": "={{ $json.confirmCancel }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "7cd8b738-e87f-4569-aea2-dc71fd10c4cb",
+      "name": "Confirm Cancel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1168,
+        2144
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'cancel_confirm_needed', message: 'I found your ' + $json.nextBooking.service + ' with ' + $json.nextBooking.barber + ' on ' + $json.nextBooking.dateLabel + ' at ' + $json.nextBooking.timeLabel + '. Shall I go ahead and cancel it?' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "8717f63e-6678-4058-b5eb-c25e5c91b430",
+      "name": "Respond - Cancel Confirm Needed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1440,
+        2288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "eventId": "={{ $json.nextBooking.eventId }}",
+        "options": {}
+      },
+      "id": "5d7aef06-325f-41a1-862f-ee7b608c4f9e",
+      "name": "Delete Appointment",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1440,
+        2048
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'cancelled', message: 'Done. Your ' + $('Find Booking To Cancel').item.json.nextBooking.service + ' on ' + $('Find Booking To Cancel').item.json.nextBooking.dateLabel + ' at ' + $('Find Booking To Cancel').item.json.nextBooking.timeLabel + ' has been cancelled.' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b5f2546d-a5b6-4b6c-a0a2-8b7a549bed16",
+      "name": "Respond - Cancelled",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1888,
+        2048
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Find Booking To Cancel').item.json.shop.shopEmail }}",
+        "subject": "={{ $('Find Booking To Cancel').item.json.cancelEmailSubject }}",
+        "message": "={{ $('Find Booking To Cancel').item.json.cancelEmailHtml }}",
+        "options": {}
+      },
+      "id": "35f70eb6-443b-4443-81b1-960a2e6e64db",
+      "name": "Email - Cancellation Notice",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2176,
+        2048
+      ],
+      "webhookId": "7f151aeb-047b-43ec-8250-95daf1b4fdd1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Phase 5 — Two-step Cancel\nStep 1: caller asks to cancel — booking is found and read back, asking for explicit confirmation. Nothing is deleted yet.\nStep 2: caller confirms — we re-look-up fresh and delete the event, then notify the shop by email. A misheard 'cancel' can never wipe a booking without a second explicit confirmation.",
+        "height": 175,
+        "width": 360,
+        "color": 2
+      },
+      "id": "275620cb-1d25-498a-ab0f-510570224f4b",
+      "name": "Sticky Note Phase 5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        256,
+        2096
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.toISO() }}",
+        "timeMax": "={{ $now.endOf('day').toISO() }}",
+        "options": {}
+      },
+      "id": "6ef3029b-de38-48b6-9230-ffda38adbfdc",
+      "name": "Get Today Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        320,
+        2624
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction emailWrap(shopObj, content) {\n  const s = shopObj || {};\n  const addr = s.address || '12 High Street, Manchester, M1 2AB';\n  const phone = s.phone || '0161 123 4567';\n  return '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head>' +\n    '<body style=\"margin:0;padding:0;background:#f0f0f0;font-family:Arial,Helvetica,sans-serif;\">' +\n    '<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f0f0f0;padding:24px 0;\"><tr><td align=\"center\">' +\n    '<table cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;width:100%;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.12);\">' +\n    '<tr><td style=\"background:#111;padding:24px 40px;text-align:center;\">' +\n    '<img src=\"https://theskyweb-portfolio.vercel.app/assets/skyweb-logo-network-CqQKEOUL.png\" alt=\"SkyWeb Barbers Co\" style=\"max-width:100px;height:auto;display:block;margin:0 auto 10px;\" />' +\n    '<p style=\"margin:0;color:#ffffff;font-size:18px;font-weight:bold;letter-spacing:1px;\">SkyWeb Barbers Co</p>' +\n    '</td></tr>' +\n    '<tr><td style=\"background:#c9a96e;height:4px;line-height:4px;font-size:0;\">&nbsp;</td></tr>' +\n    '<tr><td style=\"padding:36px 40px;color:#333;font-size:15px;line-height:1.7;\">' +\n    content +\n    '</td></tr>' +\n    '<tr><td style=\"background:#111;padding:22px 40px;text-align:center;\">' +\n    '<p style=\"margin:0 0 6px;color:#c9a96e;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;\">SkyWeb Barbers Co</p>' +\n    '<p style=\"margin:0 0 4px;color:#888;font-size:12px;\">' + addr + '</p>' +\n    '<p style=\"margin:0;color:#888;font-size:12px;\">' + phone + '</p>' +\n    '</td></tr>' +\n    '</table></td></tr></table></body></html>';\n}\nfunction infoRow(label, value) {\n  return '<tr>' +\n    '<td style=\"padding:9px 14px;background:#f8f8f8;color:#777;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;width:36%;border-bottom:1px solid #eee;\">' + label + '</td>' +\n    '<td style=\"padding:9px 14px;color:#222;font-size:14px;border-bottom:1px solid #eee;\">' + value + '</td>' +\n    '</tr>';\n}\nfunction infoTable(rows) {\n  return '<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border:1px solid #eee;border-radius:6px;overflow:hidden;margin:18px 0;\">' + rows + '</table>';\n}\nfunction h2(title, sub) {\n  return '<h2 style=\"color:#111;font-size:22px;margin:0 0 6px;font-weight:bold;\">' + title + '</h2>' +\n    (sub ? '<p style=\"color:#c9a96e;font-size:13px;font-weight:bold;margin:0 0 22px;text-transform:uppercase;letter-spacing:.5px;\">' + sub + '</p>' : '<div style=\"margin-bottom:22px;\"></div>');\n}\nfunction divider() { return '<hr style=\"border:none;border-top:1px solid #eee;margin:22px 0;\" />'; }\nfunction note(text) { return '<p style=\"color:#888;font-size:13px;margin:0;\">' + text + '</p>'; }\n\nconst p = $('Normalize + Validate Request').item.json;\nconst events = $input.all().map(i => i.json);\nconst shop = p.shop;\nconst barbers = shop.barbers;\nconst now = DateTime.now().setZone(shop.timezone);\nconst todayKey = now.weekday;\nconst dayHours = shop.openHours[todayKey];\n\nfunction parseBarberFromEvent(ev) {\n  const desc = String(ev.description || '');\n  const m = desc.match(/Barber:\\s*([A-Za-z]+)/i);\n  if (m) return m[1];\n  const summary = String(ev.summary || '');\n  const m2 = summary.match(/^([A-Za-z]+)\\s*[-:]/);\n  return m2 ? m2[1] : '';\n}\n\nconst offToday = {};\nbarbers.forEach(b => { offToday[b] = false; });\nevents.forEach(ev => {\n  const summary = String(ev.summary || '');\n  const m = summary.match(/^DAY OFF:\\s*([A-Za-z]+)/i);\n  if (m) {\n    const offBarber = barbers.find(b => b.toLowerCase() === m[1].toLowerCase());\n    if (offBarber) offToday[offBarber] = true;\n  }\n});\n\nlet assignedBarber = '', soonestStartDt = null;\nlet available = false;\n\nif (dayHours) {\n  const closeDt = DateTime.fromISO(now.toFormat('yyyy-MM-dd') + 'T' + dayHours[1], { zone: shop.timezone });\n  const openDt = DateTime.fromISO(now.toFormat('yyyy-MM-dd') + 'T' + dayHours[0], { zone: shop.timezone });\n  let cursor = now > openDt ? now : openDt;\n  const stepMinutes = 5;\n  const candidateBarbers = (p.preferredBarber ? barbers.filter(b => b.toLowerCase() === p.preferredBarber.toLowerCase()) : barbers).filter(b => !offToday[b]);\n  while (cursor.plus({ minutes: p.durationMinutes }) <= closeDt && !available) {\n    const cEnd = cursor.plus({ minutes: p.durationMinutes });\n    for (const barber of candidateBarbers) {\n      const isBusy = events.some(ev => {\n        const evStart = ev.start && ev.start.dateTime;\n        const evEnd = ev.end && ev.end.dateTime;\n        if (!evStart || !evEnd) return false;\n        const evS = DateTime.fromISO(evStart);\n        const evE = DateTime.fromISO(evEnd);\n        const evBarber = parseBarberFromEvent(ev);\n        const blocksThisBarber = evBarber ? evBarber.toLowerCase() === barber.toLowerCase() : true;\n        return blocksThisBarber && (cursor < evE && cEnd > evS);\n      });\n      if (!isBusy) { available = true; assignedBarber = barber; soonestStartDt = cursor; break; }\n    }\n    if (!available) cursor = cursor.plus({ minutes: stepMinutes });\n  }\n}\n\nconst soonestTimeLabel = soonestStartDt ? soonestStartDt.toFormat('h:mm a') : '';\nconst soonestStartISO = soonestStartDt ? soonestStartDt.toISO() : '';\nconst soonestEndISO = soonestStartDt ? soonestStartDt.plus({ minutes: p.durationMinutes }).toISO() : '';\nconst soonestDateLabel = soonestStartDt ? soonestStartDt.toFormat('cccc d LLLL') : '';\nconst barberEmail = shop.barberEmails && shop.barberEmails[assignedBarber] ? shop.barberEmails[assignedBarber] : '';\n\nconst customerEmailSubject = 'Booking Confirmed - ' + shop.name;\nconst customerEmailHtml = soonestStartDt ? emailWrap(shop,\n  h2('Booking Confirmed', 'Walk-in appointment confirmed for today') +\n  '<p style=\"margin:0 0 16px;\">Hi <strong>' + (p.customerName || 'there') + '</strong>,</p>' +\n  '<p style=\"margin:0 0 4px;\">We have a slot ready for you today at <strong>' + shop.name + '</strong>:</p>' +\n  infoTable(\n    infoRow('Service', p.serviceName + ' &nbsp;<span style=\"color:#c9a96e;font-size:12px;\">(' + p.servicePrice + ')</span>') +\n    infoRow('Barber', assignedBarber) +\n    infoRow('Date', soonestDateLabel + ' (today)') +\n    infoRow('Time', soonestTimeLabel)\n  ) +\n  '<p style=\"margin:0 0 6px;\"><strong>Location</strong></p>' +\n  '<p style=\"margin:0 0 4px;color:#555;\">' + shop.address + '</p>' +\n  '<p style=\"margin:0 0 20px;color:#888;font-size:13px;\">' + shop.parking + '</p>' +\n  divider() + note(shop.cancellation) +\n  '<p style=\"margin:22px 0 0;color:#333;\">See you soon,<br><strong>The ' + shop.name + ' Team</strong></p>'\n) : '';\n\nconst shopEmailSubject = 'New Walk-In: ' + (p.customerName || 'Walk-in customer') + ' with ' + assignedBarber;\nconst shopEmailHtml = soonestStartDt ? emailWrap(shop,\n  h2('New Walk-In Booking', '') +\n  infoTable(\n    infoRow('Customer', p.customerName || 'not given') +\n    infoRow('Phone', p.phone || 'not given') +\n    infoRow('Email', p.email || 'not given') +\n    infoRow('Service', p.serviceName + ' (' + p.servicePrice + ')') +\n    infoRow('Barber', assignedBarber) +\n    infoRow('Date', soonestDateLabel + ' (today)') +\n    infoRow('Time', soonestTimeLabel) +\n    infoRow('Notes', p.notes || 'none')\n  )\n) : '';\n\nconst barberEmailSubject = 'New Walk-In Assigned to You: ' + (p.customerName || 'walk-in customer');\nconst barberEmailHtml = soonestStartDt ? emailWrap(shop,\n  h2('New Walk-In Appointment', 'You have a new booking today') +\n  '<p style=\"margin:0 0 16px;\">Hi <strong>' + assignedBarber + '</strong>,</p>' +\n  infoTable(\n    infoRow('Customer', p.customerName || 'walk-in') +\n    infoRow('Phone', p.phone || 'not given') +\n    infoRow('Service', p.serviceName + ' (' + p.servicePrice + ')') +\n    infoRow('Time', soonestDateLabel + ', ' + soonestTimeLabel + ' (today)') +\n    infoRow('Notes', p.notes || 'none')\n  )\n) : '';\n\nconst eventSummary = assignedBarber + ' - ' + p.serviceName + ' - ' + (p.customerName || 'walk-in');\nconst eventDescription = soonestStartDt ?\n  'Barber: ' + assignedBarber + '\\nService: ' + p.serviceName + '\\nCustomer: ' + (p.customerName || 'walk-in') +\n  '\\nPhone: ' + (p.phone || '') + '\\nEmail: ' + (p.email || '') + '\\nNotes: ' + (p.notes || 'walk-in booking') : '';\n\nreturn [{ json: Object.assign({}, p, {\n  available, assignedBarber, barberEmail,\n  soonestTimeLabel, soonestStartISO, soonestEndISO, soonestDateLabel,\n  startISO: soonestStartISO, endISO: soonestEndISO, dateLabel: soonestDateLabel, startTimeLabel: soonestTimeLabel,\n  customerEmailSubject, customerEmailHtml, shopEmailSubject, shopEmailHtml, barberEmailSubject, barberEmailHtml,\n  eventSummary, eventDescription\n}) }];\n"
+      },
+      "id": "83bd3035-71fc-4b75-9b7b-f92c4fb90810",
+      "name": "Find Soonest Slot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        2624
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "soonest-found",
+              "leftValue": "={{ $json.available }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "bc1a3ca6-6ebc-4239-8488-c40c3b663358",
+      "name": "Soonest Slot Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        2624
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'walk_in_slot_found', message: $json.assignedBarber + ' can fit you in at ' + $json.soonestTimeLabel + ' today for a ' + $json.serviceName + '. Shall I book it in?', barber: $json.assignedBarber, time: $json.soonestTimeLabel, start_iso: $json.soonestStartISO, end_iso: $json.soonestEndISO } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "41a1125e-b490-4edf-92f6-939b46ac256b",
+      "name": "Respond - Walk In Slot",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        2544
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'walk_in_unavailable', message: \"I'm sorry, we don't have anything free for the rest of today\" + ($json.preferredBarber ? (' with ' + $json.preferredBarber) : '') + '. Would you like to book for another day instead, or try a different barber?' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "f3fc5b8a-2cc1-45f0-aec4-ab1880acb2ae",
+      "name": "Respond - No Walk In Today",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        2704
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Phase 6 — Walk-in / Next Available Slot\nNo date or time needed — just the service (and optionally a preferred barber). Scans from right now to closing time in 5-minute steps and reports the very first free slot. Report-only: the caller then confirms and the assistant calls book_appointment to actually reserve it.",
+        "height": 165,
+        "width": 360,
+        "color": 4
+      },
+      "id": "7599490d-7364-4586-b9b7-f7006a280ca3",
+      "name": "Sticky Note Phase 6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        256,
+        2496
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "518fc742-ce49-4b79-8043-0825bc12a118",
+      "name": "Daily Reminder Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1136,
+        3040
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.plus({days:1}).startOf('day').toISO() }}",
+        "timeMax": "={{ $now.plus({days:1}).endOf('day').toISO() }}",
+        "options": {}
+      },
+      "id": "7b81ec72-0511-4588-a639-a9ef23c5dfd1",
+      "name": "Get Tomorrow Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -864,
+        3040
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction emailWrap(shopObj, content) {\n  const s = shopObj || {};\n  const addr = s.address || '12 High Street, Manchester, M1 2AB';\n  const phone = s.phone || '0161 123 4567';\n  return '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head>' +\n    '<body style=\"margin:0;padding:0;background:#f0f0f0;font-family:Arial,Helvetica,sans-serif;\">' +\n    '<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f0f0f0;padding:24px 0;\"><tr><td align=\"center\">' +\n    '<table cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;width:100%;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.12);\">' +\n    '<tr><td style=\"background:#111;padding:24px 40px;text-align:center;\">' +\n    '<img src=\"https://theskyweb-portfolio.vercel.app/assets/skyweb-logo-network-CqQKEOUL.png\" alt=\"SkyWeb Barbers Co\" style=\"max-width:100px;height:auto;display:block;margin:0 auto 10px;\" />' +\n    '<p style=\"margin:0;color:#ffffff;font-size:18px;font-weight:bold;letter-spacing:1px;\">SkyWeb Barbers Co</p>' +\n    '</td></tr>' +\n    '<tr><td style=\"background:#c9a96e;height:4px;line-height:4px;font-size:0;\">&nbsp;</td></tr>' +\n    '<tr><td style=\"padding:36px 40px;color:#333;font-size:15px;line-height:1.7;\">' +\n    content +\n    '</td></tr>' +\n    '<tr><td style=\"background:#111;padding:22px 40px;text-align:center;\">' +\n    '<p style=\"margin:0 0 6px;color:#c9a96e;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;\">SkyWeb Barbers Co</p>' +\n    '<p style=\"margin:0 0 4px;color:#888;font-size:12px;\">' + addr + '</p>' +\n    '<p style=\"margin:0;color:#888;font-size:12px;\">' + phone + '</p>' +\n    '</td></tr>' +\n    '</table></td></tr></table></body></html>';\n}\nfunction infoRow(label, value) {\n  return '<tr>' +\n    '<td style=\"padding:9px 14px;background:#f8f8f8;color:#777;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;width:36%;border-bottom:1px solid #eee;\">' + label + '</td>' +\n    '<td style=\"padding:9px 14px;color:#222;font-size:14px;border-bottom:1px solid #eee;\">' + value + '</td>' +\n    '</tr>';\n}\nfunction infoTable(rows) {\n  return '<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border:1px solid #eee;border-radius:6px;overflow:hidden;margin:18px 0;\">' + rows + '</table>';\n}\nfunction h2(title, sub) {\n  return '<h2 style=\"color:#111;font-size:22px;margin:0 0 6px;font-weight:bold;\">' + title + '</h2>' +\n    (sub ? '<p style=\"color:#c9a96e;font-size:13px;font-weight:bold;margin:0 0 22px;text-transform:uppercase;letter-spacing:.5px;\">' + sub + '</p>' : '<div style=\"margin-bottom:22px;\"></div>');\n}\nfunction divider() { return '<hr style=\"border:none;border-top:1px solid #eee;margin:22px 0;\" />'; }\nfunction note(text) { return '<p style=\"color:#888;font-size:13px;margin:0;\">' + text + '</p>'; }\n\nfunction parseField(desc, label) {\n  const re = new RegExp(label + ':\\\\s*([^\\\\n]+)', 'i');\n  const m = String(desc || '').match(re);\n  return m ? m[1].trim() : '';\n}\n\nconst shopConfig = {\n  name: 'SkyWeb Barbers Co',\n  address: '12 High Street, Manchester, M1 2AB',\n  phone: '0161 123 4567',\n  parking: 'Free street parking after 6pm, and a paid NCP car park two minutes walk away.',\n  cancellation: 'You can cancel free up to 2 hours before your appointment. Repeated no-shows may need a deposit for future bookings.'\n};\n\nreturn $input.all().map(item => {\n  const ev = item.json;\n  const desc = String(ev.description || '');\n  const customerName = parseField(desc, 'Customer');\n  const customerEmail = parseField(desc, 'Email');\n  const barber = parseField(desc, 'Barber');\n  const service = parseField(desc, 'Service');\n  const startDt = ev.start && ev.start.dateTime ? DateTime.fromISO(ev.start.dateTime) : null;\n  const dateLabel = startDt ? startDt.toFormat('cccc d LLLL') : '';\n  const timeLabel = startDt ? startDt.toFormat('h:mm a') : '';\n\n  const reminderSubject = 'Reminder: Your Appointment Tomorrow at ' + shopConfig.name;\n  const reminderHtml = emailWrap(shopConfig,\n    h2('See You Tomorrow', 'Your appointment reminder') +\n    '<p style=\"margin:0 0 16px;\">Hi <strong>' + customerName + '</strong>,</p>' +\n    '<p style=\"margin:0 0 4px;\">Just a friendly reminder about your appointment tomorrow at <strong>' + shopConfig.name + '</strong>:</p>' +\n    infoTable(\n      infoRow('Service', service) +\n      infoRow('Barber', barber) +\n      infoRow('Date', dateLabel) +\n      infoRow('Time', timeLabel)\n    ) +\n    '<p style=\"margin:0 0 6px;\"><strong>Location</strong></p>' +\n    '<p style=\"margin:0 0 4px;color:#555;\">' + shopConfig.address + '</p>' +\n    '<p style=\"margin:0 0 20px;color:#888;font-size:13px;\">' + shopConfig.parking + '</p>' +\n    divider() + note(shopConfig.cancellation) +\n    '<p style=\"margin:22px 0 0;color:#333;\">See you tomorrow,<br><strong>The ' + shopConfig.name + ' Team</strong></p>'\n  );\n\n  return { json: { customerName, customerEmail, barber, service, dateLabel, timeLabel, reminderSubject, reminderHtml, hasEmail: !!customerEmail } };\n});\n"
+      },
+      "id": "1a4caae3-5350-42cf-af60-aad48f491e8b",
+      "name": "Build Reminder Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        3040
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "has-email-reminder",
+              "leftValue": "={{ $json.hasEmail }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "06e8f729-a8f8-402e-998a-dcb65f06722e",
+      "name": "Has Email For Reminder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -304,
+        3040
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customerEmail }}",
+        "subject": "={{ $json.reminderSubject }}",
+        "message": "={{ $json.reminderHtml }}",
+        "options": {}
+      },
+      "id": "df2f8d33-dfad-49eb-9f04-d18a93bbe057",
+      "name": "Send Reminder Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -16,
+        2960
+      ],
+      "webhookId": "edae769b-4f82-45b0-9af0-b12c4c406318",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Phase 7 — Daily Appointment Reminders\nSeparate schedule trigger at 8am daily. Pulls tomorrow's Google Calendar events, parses each description for customer email, and sends a reminder email per booking. Appointments with no email on file are silently skipped.",
+        "height": 145,
+        "width": 320,
+        "color": 5
+      },
+      "id": "bb197796-533d-4d8b-b1c4-8ec67ba870e6",
+      "name": "Sticky Note Phase 7",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        2848
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 5,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "subject:(off OR sick OR unavailable)",
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "id": "904cee01-ca99-47b9-ad32-2726d4183e01",
+      "name": "Barber Day Off Email Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -1136,
+        3440
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const shop = {\n  name: 'SkyWeb Barber Co',\n  timezone: 'Europe/London',\n  shopEmail: 'faizan.shahzad2002@gmail.com',\n  barbers: ['Faizan', 'Sam', 'Tony'],\n  barberEmails: { 'Faizan': 'faizan.shahzad2024@gmail.com', 'Sam': 'sam@skywebbarberco.example.com', 'Tony': 'tony@skywebbarberco.example.com' }\n};\n\nconst email = $input.first().json;\nconst subject = String(email.subject || '');\nconst bodyText = String(email.text || email.snippet || '');\nconst fromHeader = String(email.from || '');\nconst blob = (subject + ' ' + bodyText).toLowerCase();\n\nconst matchedBarber = shop.barbers.find(b => blob.indexOf(b.toLowerCase()) >= 0) || '';\n\nconst dateMatch = bodyText.match(/(\\d{4}-\\d{2}-\\d{2})/) || subject.match(/(\\d{4}-\\d{2}-\\d{2})/);\nlet offDate = '';\nif (dateMatch) {\n  offDate = dateMatch[1];\n} else if (/today/.test(blob)) {\n  offDate = DateTime.now().setZone(shop.timezone).toFormat('yyyy-MM-dd');\n} else if (/tomorrow/.test(blob)) {\n  offDate = DateTime.now().setZone(shop.timezone).plus({ days: 1 }).toFormat('yyyy-MM-dd');\n}\n\nconst recognised = !!matchedBarber && !!offDate;\n\nreturn [{ json: { shop, matchedBarber, offDate, recognised, fromHeader, subject, emailSnippet: bodyText.slice(0, 300) } }];\n"
+      },
+      "id": "ad55e7cd-182c-4e70-a325-010b3b4eb5a7",
+      "name": "Parse Day Off Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -864,
+        3440
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "day-off-recognised",
+              "leftValue": "={{ $json.recognised }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "aa9ac7d5-47bf-42ee-ab0f-023a338cab5a",
+      "name": "Day Off Recognised?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -576,
+        3440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $json.offDate }}T00:00:00",
+        "timeMax": "={{ $json.offDate }}T23:59:59",
+        "options": {}
+      },
+      "id": "39fb390b-d177-4447-8e87-1b51f1f9c445",
+      "name": "Get Affected Day Events",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -304,
+        3376
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction emailWrap(shopObj, content) {\n  const s = shopObj || {};\n  const addr = s.address || '12 High Street, Manchester, M1 2AB';\n  const phone = s.phone || '0161 123 4567';\n  return '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"></head>' +\n    '<body style=\"margin:0;padding:0;background:#f0f0f0;font-family:Arial,Helvetica,sans-serif;\">' +\n    '<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f0f0f0;padding:24px 0;\"><tr><td align=\"center\">' +\n    '<table cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;width:100%;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.12);\">' +\n    '<tr><td style=\"background:#111;padding:24px 40px;text-align:center;\">' +\n    '<img src=\"https://theskyweb-portfolio.vercel.app/assets/skyweb-logo-network-CqQKEOUL.png\" alt=\"SkyWeb Barbers Co\" style=\"max-width:100px;height:auto;display:block;margin:0 auto 10px;\" />' +\n    '<p style=\"margin:0;color:#ffffff;font-size:18px;font-weight:bold;letter-spacing:1px;\">SkyWeb Barbers Co</p>' +\n    '</td></tr>' +\n    '<tr><td style=\"background:#c9a96e;height:4px;line-height:4px;font-size:0;\">&nbsp;</td></tr>' +\n    '<tr><td style=\"padding:36px 40px;color:#333;font-size:15px;line-height:1.7;\">' +\n    content +\n    '</td></tr>' +\n    '<tr><td style=\"background:#111;padding:22px 40px;text-align:center;\">' +\n    '<p style=\"margin:0 0 6px;color:#c9a96e;font-size:12px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;\">SkyWeb Barbers Co</p>' +\n    '<p style=\"margin:0 0 4px;color:#888;font-size:12px;\">' + addr + '</p>' +\n    '<p style=\"margin:0;color:#888;font-size:12px;\">' + phone + '</p>' +\n    '</td></tr>' +\n    '</table></td></tr></table></body></html>';\n}\nfunction infoRow(label, value) {\n  return '<tr>' +\n    '<td style=\"padding:9px 14px;background:#f8f8f8;color:#777;font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;width:36%;border-bottom:1px solid #eee;\">' + label + '</td>' +\n    '<td style=\"padding:9px 14px;color:#222;font-size:14px;border-bottom:1px solid #eee;\">' + value + '</td>' +\n    '</tr>';\n}\nfunction infoTable(rows) {\n  return '<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border:1px solid #eee;border-radius:6px;overflow:hidden;margin:18px 0;\">' + rows + '</table>';\n}\nfunction h2(title, sub) {\n  return '<h2 style=\"color:#111;font-size:22px;margin:0 0 6px;font-weight:bold;\">' + title + '</h2>' +\n    (sub ? '<p style=\"color:#c9a96e;font-size:13px;font-weight:bold;margin:0 0 22px;text-transform:uppercase;letter-spacing:.5px;\">' + sub + '</p>' : '<div style=\"margin-bottom:22px;\"></div>');\n}\nfunction divider() { return '<hr style=\"border:none;border-top:1px solid #eee;margin:22px 0;\" />'; }\nfunction note(text) { return '<p style=\"color:#888;font-size:13px;margin:0;\">' + text + '</p>'; }\n\nconst p = $('Parse Day Off Email').item.json;\nconst events = $input.all().map(i => i.json);\nconst shop = p.shop;\n\nfunction parseField(desc, label) {\n  const re = new RegExp(label + ':\\\\s*([^\\\\n]+)', 'i');\n  const m = String(desc || '').match(re);\n  return m ? m[1].trim() : '';\n}\n\nconst affected = events\n  .filter(ev => parseField(ev.description, 'Barber').toLowerCase() === p.matchedBarber.toLowerCase())\n  .map(ev => {\n    const desc = String(ev.description || '');\n    const startDt = ev.start && ev.start.dateTime ? DateTime.fromISO(ev.start.dateTime) : null;\n    return {\n      eventId: ev.id,\n      customerName: parseField(desc, 'Customer'),\n      phone: parseField(desc, 'Phone'),\n      service: parseField(desc, 'Service'),\n      timeLabel: startDt ? startDt.toFormat('h:mm a') : ''\n    };\n  });\n\nconst affectedCount = affected.length;\nconst dateLabel = p.offDate ? DateTime.fromISO(p.offDate, { zone: shop.timezone }).toFormat('cccc d LLLL') : p.offDate;\nconst rowsHtml = affected.map(a =>\n  infoRow(a.timeLabel, a.customerName + ' &nbsp;&bull;&nbsp; ' + a.phone + ' &nbsp;&bull;&nbsp; ' + a.service)\n).join('');\n\nconst actionNeededSubject = 'Action Required: ' + p.matchedBarber + ' off ' + dateLabel + ' (' + affectedCount + ' booking' + (affectedCount !== 1 ? 's' : '') + ')';\nconst actionNeededHtml = emailWrap(shop,\n  h2('Day Off - Action Required', p.matchedBarber + ' is off on ' + dateLabel) +\n  '<p style=\"margin:0 0 16px;color:#555;\">' + affectedCount + ' booking' + (affectedCount !== 1 ? 's' : '') + ' need to be reassigned or cancelled:</p>' +\n  (affectedCount > 0 ? infoTable(rowsHtml) : '<p style=\"color:#888;\">No bookings found for this day.</p>') +\n  divider() +\n  '<p style=\"margin:0;color:#888;font-size:13px;\"><strong>Original email:</strong> &quot;' + p.emailSnippet + '&quot;</p>'\n);\n\nconst barberOffEmail = shop.barberEmails && shop.barberEmails[p.matchedBarber] ? shop.barberEmails[p.matchedBarber] : '';\nconst barberOffEmailSubject = 'Day Off Confirmed: ' + dateLabel;\nconst barberOffEmailHtml = emailWrap(shop,\n  h2('Day Off Confirmed', 'You are marked as off on ' + dateLabel) +\n  '<p style=\"margin:0 0 16px;\">Hi <strong>' + p.matchedBarber + '</strong>,</p>' +\n  '<p style=\"margin:0 0 16px;color:#555;\">We have received your day-off request and marked you as unavailable on <strong>' + dateLabel + '</strong>.</p>' +\n  (affectedCount > 0\n    ? '<p style=\"margin:0 0 16px;color:#555;\">' + affectedCount + ' existing booking' + (affectedCount !== 1 ? 's' : '') + ' on that day will be reassigned or cancelled. Affected customers will be notified.</p>'\n    : '<p style=\"margin:0 0 16px;color:#555;\">You have no bookings on that day - no action needed.</p>') +\n  divider() +\n  note('If this was made in error, please contact the shop as soon as possible.') +\n  '<p style=\"margin:22px 0 0;color:#333;\">Best regards,<br><strong>The ' + shop.name + ' Team</strong></p>'\n);\n\nconst noBookingsSubject = p.matchedBarber + ' off ' + dateLabel + ' - no bookings affected';\nconst noBookingsHtml = emailWrap(shop,\n  h2('Day Off Noted', p.matchedBarber + ' is marked off on ' + dateLabel) +\n  '<p style=\"margin:0 0 16px;color:#555;\">Good news - there are no existing bookings on that day, so no action is required.</p>' +\n  divider() +\n  note('If anything changes, the schedule will be updated automatically.')\n);\n\nreturn [{ json: Object.assign({}, p, { affected, affectedCount, dateLabel, actionNeededSubject, actionNeededHtml, barberOffEmail, barberOffEmailSubject, barberOffEmailHtml, noBookingsSubject, noBookingsHtml }) }];\n"
+      },
+      "id": "01ecefe0-ef86-4ae8-97ec-a21fc8a5f7df",
+      "name": "Find Affected Bookings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "has-affected",
+              "leftValue": "={{ $json.affectedCount }}",
+              "operator": {
+                "operation": "gt",
+                "type": "number"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "b75b1c74-73b2-4507-acaa-439bd76de03e",
+      "name": "Has Affected Bookings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        256,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.shop.shopEmail }}",
+        "subject": "={{ $json.actionNeededSubject }}",
+        "message": "={{ $json.actionNeededHtml }}",
+        "options": {}
+      },
+      "id": "d7c322f4-9ea2-4a8f-b649-10854e24d5ac",
+      "name": "Email - Day Off Action Needed",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        544,
+        3296
+      ],
+      "webhookId": "2056667b-3e22-455a-ab03-8a000a10a49a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.shop.shopEmail }}",
+        "subject": "={{ $json.noBookingsSubject }}",
+        "message": "={{ $json.noBookingsHtml }}",
+        "options": {}
+      },
+      "id": "4e3f3d22-79de-40a6-ac87-666fce19e987",
+      "name": "Email - Day Off No Bookings",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        544,
+        3488
+      ],
+      "webhookId": "e7f02160-7781-4163-94ee-5c63421289d0",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.shop.shopEmail }}",
+        "subject": "={{ 'Could not auto-process: ' + $json.subject }}",
+        "message": "={{ '<p>Received a possible day-off email that could not be automatically understood:</p><p>From: ' + $json.fromHeader + '<br>Subject: ' + $json.subject + '</p><p>' + $json.emailSnippet + '</p><p>Please action manually.</p>' }}",
+        "options": {}
+      },
+      "id": "60335d19-7ec4-447e-8bf8-e324d3407e52",
+      "name": "Email - Day Off Not Understood",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -304,
+        3568
+      ],
+      "webhookId": "4cc13810-eab1-4c85-a540-fb1d9a06fe27",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Phase 8 — Barber Day Off Management\nPolls Gmail every 5 minutes for unread emails mentioning 'off', 'sick', or 'unavailable'. Parses the barber name and date, finds affected bookings for that day, and emails the shop with an action list. Reassignment decisions are left to humans, not auto-resolved.",
+        "height": 165,
+        "width": 320,
+        "color": 6
+      },
+      "id": "8b0a7524-3190-4c95-bb0f-0fe74e41c11b",
+      "name": "Sticky Note Phase 8",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        3216
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Check Slot + Alternatives').item.json.barberEmail }}",
+        "subject": "={{ $('Check Slot + Alternatives').item.json.barberEmailSubject }}",
+        "message": "={{ $('Check Slot + Alternatives').item.json.barberEmailHtml }}",
+        "options": {}
+      },
+      "id": "2f23740f-b724-44d8-8de0-cef31d954dd0",
+      "name": "Email - Notify Barber (Booked)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3424,
+        1200
+      ],
+      "webhookId": "27281e91-1824-4d7d-a136-89804af53661",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.barberEmail }}",
+        "subject": "={{ $json.barberEmailSubject }}",
+        "message": "={{ $json.barberEmailHtml }}",
+        "options": {}
+      },
+      "id": "aa21205a-6684-4192-b54e-f38eb705266e",
+      "name": "Email - Notify Barber (Rescheduled)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3024,
+        1616
+      ],
+      "webhookId": "8e611ccd-eb24-4a61-a3e6-15f16d38c8ac",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Find Booking To Cancel').item.json.barberCancelEmail }}",
+        "subject": "={{ $('Find Booking To Cancel').item.json.barberCancelEmailSubject }}",
+        "message": "={{ $('Find Booking To Cancel').item.json.barberCancelEmailHtml }}",
+        "options": {}
+      },
+      "id": "29c04f91-7d97-4c1f-9e3a-330b1fe1ca22",
+      "name": "Email - Notify Barber (Cancelled)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2464,
+        2048
+      ],
+      "webhookId": "0ab1bda5-0daa-425d-ba38-c0addae621f7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.barberOffEmail }}",
+        "subject": "={{ $json.barberOffEmailSubject }}",
+        "message": "={{ $json.barberOffEmailHtml }}",
+        "options": {}
+      },
+      "id": "0dc9dedb-8ee1-409b-9a0f-bf2b2c511e6a",
+      "name": "Email - Notify Barber (Day Off Confirmed)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        544,
+        3184
+      ],
+      "webhookId": "b904c4d2-5fbe-409f-ae66-e39eed70791f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2twADx24II5a0hOS",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1a0rbZONdsGr1sY67JUP0dNleo-b1lVz-nbrm-pVuhzA"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Bookings"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Booking ID",
+              "id": "Booking ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Customer",
+              "id": "Customer",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone",
+              "id": "Phone",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Email",
+              "id": "Email",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Service",
+              "id": "Service",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date Time",
+              "id": "Date Time",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Status",
+              "id": "Status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Barber",
+              "id": "Barber",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Preferred Barber",
+              "id": "Preferred Barber",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Notes",
+              "id": "Notes",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "Barber": "={{ $('Check Slot + Alternatives').item.json.assignedBarber }}",
+            "Booking ID": "={{ 'BARB-' + Date.now() }}",
+            "Customer": "={{ $('Check Slot + Alternatives').item.json.customerName }}",
+            "Date Time": "={{ $('Check Slot + Alternatives').item.json.dateLabel + ' ' + $('Check Slot + Alternatives').item.json.startTimeLabel }}",
+            "Email": "={{ $('Check Slot + Alternatives').item.json.email }}",
+            "Notes": "={{ $('Check Slot + Alternatives').item.json.notes }}",
+            "Phone": "={{ $('Check Slot + Alternatives').item.json.phone }}",
+            "Preferred Barber": "={{ $('Check Slot + Alternatives').item.json.preferredBarber }}",
+            "Service": "={{ $('Check Slot + Alternatives').item.json.serviceName }}",
+            "Status": "Booked"
+          }
+        },
+        "options": {}
+      },
+      "id": "51cd297a-4674-48eb-ab35-895b79d7a464",
+      "name": "Sheets - Log Booking",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3424,
+        1360
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Ejy1rMvmbyLwgcUk",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1a0rbZONdsGr1sY67JUP0dNleo-b1lVz-nbrm-pVuhzA"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Bookings"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Booking ID",
+              "id": "Booking ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Customer",
+              "id": "Customer",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone",
+              "id": "Phone",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Email",
+              "id": "Email",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Service",
+              "id": "Service",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date Time",
+              "id": "Date Time",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Status",
+              "id": "Status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Barber",
+              "id": "Barber",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Preferred Barber",
+              "id": "Preferred Barber",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Notes",
+              "id": "Notes",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "Booking ID": "={{ 'BARB-' + Date.now() }}",
+            "Customer": "={{ $('Check Reschedule Slot').item.json.customerNameForUpdate }}",
+            "Phone": "={{ $('Check Reschedule Slot').item.json.phone }}",
+            "Email": "={{ $('Check Reschedule Slot').item.json.email }}",
+            "Service": "={{ $('Check Reschedule Slot').item.json.serviceNameForUpdate }}",
+            "Date Time": "={{ $('Check Reschedule Slot').item.json.dateLabel + ' ' + $('Check Reschedule Slot').item.json.newTimeLabel }}",
+            "Status": "Rescheduled",
+            "Barber": "={{ $('Check Reschedule Slot').item.json.assignedBarber }}",
+            "Preferred Barber": "={{ $('Check Reschedule Slot').item.json.preferredBarber }}",
+            "Notes": "={{ 'Rescheduled from ' + $('Check Reschedule Slot').item.json.oldDateLabel + ' ' + $('Check Reschedule Slot').item.json.oldTimeLabel }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "ac2b6211-e200-4e8a-8b1f-30b2c0189dcd",
+      "name": "Sheets - Log Reschedule",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3024,
+        1776
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Ejy1rMvmbyLwgcUk",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1a0rbZONdsGr1sY67JUP0dNleo-b1lVz-nbrm-pVuhzA"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Bookings"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Booking ID",
+              "id": "Booking ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Customer",
+              "id": "Customer",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone",
+              "id": "Phone",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Email",
+              "id": "Email",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Service",
+              "id": "Service",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date Time",
+              "id": "Date Time",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Status",
+              "id": "Status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Barber",
+              "id": "Barber",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Preferred Barber",
+              "id": "Preferred Barber",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Notes",
+              "id": "Notes",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "Barber": "={{ $('Find Booking To Cancel').item.json.nextBooking.barber }}",
+            "Booking ID": "={{ 'BARB-' + Date.now() }}",
+            "Customer": "={{ $('Find Booking To Cancel').item.json.nextBooking.customerName }}",
+            "Date Time": "={{ $('Find Booking To Cancel').item.json.nextBooking.dateLabel + ' ' + $('Find Booking To Cancel').item.json.nextBooking.timeLabel }}",
+            "Email": "={{ $('Find Booking To Cancel').item.json.email }}",
+            "Notes": "Cancelled by customer",
+            "Phone": "={{ $('Find Booking To Cancel').item.json.phone }}",
+            "Preferred Barber": "={{ $('Find Booking To Cancel').item.json.preferredBarber }}",
+            "Service": "={{ $('Find Booking To Cancel').item.json.nextBooking.service }}",
+            "Status": "Cancelled"
+          }
+        },
+        "options": {}
+      },
+      "id": "cc23345d-8155-491e-9705-a525056d1752",
+      "name": "Sheets - Log Cancellation",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2464,
+        2208
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Ejy1rMvmbyLwgcUk",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1a0rbZONdsGr1sY67JUP0dNleo-b1lVz-nbrm-pVuhzA"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Bookings"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Booking ID",
+              "id": "Booking ID",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Customer",
+              "id": "Customer",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Phone",
+              "id": "Phone",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Email",
+              "id": "Email",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Service",
+              "id": "Service",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Date Time",
+              "id": "Date Time",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Status",
+              "id": "Status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Barber",
+              "id": "Barber",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Preferred Barber",
+              "id": "Preferred Barber",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": false,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "Notes",
+              "id": "Notes",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "Barber": "={{ $json.matchedBarber }}",
+            "Booking ID": "={{ 'BARB-' + Date.now() }}",
+            "Customer": "={{ $json.affectedItem.customerName }}",
+            "Date Time": "={{ $json.dateLabel + ' ' + $json.affectedItem.timeLabel }}",
+            "Email": "",
+            "Notes": "Affected by barber day off",
+            "Phone": "={{ $json.affectedItem.phone }}",
+            "Preferred Barber": "={{ $json.matchedBarber }}",
+            "Service": "={{ $json.affectedItem.service }}",
+            "Status": "Cancelled - Barber Off"
+          }
+        },
+        "options": {}
+      },
+      "id": "cf113124-96d4-49ec-9f7d-cf75028cadd0",
+      "name": "Sheets - Log Day Off Cancellations",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        256,
+        3184
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Ejy1rMvmbyLwgcUk",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "affected",
+        "include": "allOtherFields",
+        "options": {
+          "destinationFieldName": "affectedItem"
+        }
+      },
+      "id": "f8e96c67-e10f-4d61-8bed-ed712d74e4ca",
+      "name": "Split Out Affected Bookings",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        256,
+        3184
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "calendar",
+        "calendar": {
+          "__rl": true,
+          "cachedResultName": "SkyWeb Barber Shop Calendar",
+          "mode": "list",
+          "value": "primary"
+        },
+        "options": {}
+      },
+      "id": "15b42d00-6512-4cde-96bd-901fbb4443bb",
+      "name": "Create Day Off Marker",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -304,
+        3216
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "theskyweb.uk@gmail.com",
+          "mode": "list",
+          "cachedResultName": "theskyweb.uk@gmail.com"
+        },
+        "returnAll": true,
+        "timeMin": "={{ $now.minus({days:90}).toISO() }}",
+        "timeMax": "={{ $now.startOf('day').toISO() }}",
+        "options": {}
+      },
+      "id": "1366058c-4b07-4fa5-b16d-968ff06bb960",
+      "name": "Get Past Day Off Markers",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -1136,
+        2752
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const events = $input.all().map(i => i.json);\nconst expired = events.filter(ev => /^DAY OFF:/i.test(String(ev.summary || '')));\nreturn expired.map(ev => ({ json: { eventId: ev.id, summary: ev.summary } }));\n"
+      },
+      "id": "18cb1621-7ced-4c97-9401-4b0fc0eec2c6",
+      "name": "Filter Expired Day Off Markers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -864,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "calendar": {
+          "__rl": true,
+          "value": "theskyweb.uk@gmail.com",
+          "mode": "list",
+          "cachedResultName": "theskyweb.uk@gmail.com"
+        },
+        "eventId": "={{ $json.eventId }}",
+        "options": {}
+      },
+      "id": "8de18026-bea8-4efe-9d3a-24a3441fede5",
+      "name": "Delete Expired Day Off Marker",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -576,
+        2752
+      ],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "QJoE4nTuyyFNlb0z",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Day-off Marker Cleanup\nRuns in parallel with the 8am daily reminder. Searches Google Calendar for 'DAY OFF:' marker events older than 90 days and deletes them to keep the calendar clean.",
+        "height": 125,
+        "width": 320,
+        "color": 7
+      },
+      "id": "cd497014-6664-45f7-bbba-9bebb956711c",
+      "name": "Sticky Note Day Off Cleanup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        2576
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://eatpsykqvqtncdrvsqnc.supabase.co/rest/v1/rpc/get_shop_data",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ee81ddb1-1f57-40bb-ac57-bd9213be3219",
+      "name": "Fetch Shop Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -1120,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://eatpsykqvqtncdrvsqnc.supabase.co/rest/v1/appointments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ calendar_event_id: $json.id, barber_name: $('Check Slot + Alternatives').first().json.assignedBarber, customer_name: $('Check Slot + Alternatives').first().json.customerName, customer_phone: $('Check Slot + Alternatives').first().json.phone, customer_email: $('Check Slot + Alternatives').first().json.email, service_name: $('Check Slot + Alternatives').first().json.serviceName, service_price: $('Check Slot + Alternatives').first().json.servicePrice, start_time: $('Check Slot + Alternatives').first().json.startISO, end_time: $('Check Slot + Alternatives').first().json.endISO, status: 'confirmed' }) }}",
+        "options": {}
+      },
+      "id": "08e867e6-d067-4406-a20e-3b8b3d192a1d",
+      "name": "Sync Booking Create",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2576,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://eatpsykqvqtncdrvsqnc.supabase.co/rest/v1/appointments?calendar_event_id=eq.' + $('Check Reschedule Slot').first().json.existingEventId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ start_time: $('Check Reschedule Slot').first().json.startISO, end_time: $('Check Reschedule Slot').first().json.endISO, status: 'confirmed', updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "eca06dc7-51b9-4ae0-b0a6-49f0c43fc90e",
+      "name": "Sync Booking Update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2160,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://eatpsykqvqtncdrvsqnc.supabase.co/rest/v1/appointments?calendar_event_id=eq.' + $('Find Booking To Cancel').first().json.nextBooking.eventId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'cancelled', updated_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "7bd9aaeb-3f13-45c0-a6a9-b628ea2501ff",
+      "name": "Sync Booking Cancel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1600,
+        2048
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://eatpsykqvqtncdrvsqnc.supabase.co/rest/v1/appointments",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            },
+            {
+              "name": "barber_name",
+              "value": "={{ 'eq.' + $json.assignedBarber }}"
+            },
+            {
+              "name": "start_time",
+              "value": "={{ 'lt.' + $json.endISO }}"
+            },
+            {
+              "name": "end_time",
+              "value": "={{ 'gt.' + $json.startISO }}"
+            },
+            {
+              "name": "status",
+              "value": "neq.cancelled"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVhdHBzeWtxdnF0bmNkcnZzcW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0ODUyMjcsImV4cCI6MjA5NjA2MTIyN30.yPSh-WK_wf0dRKv5e-3qdd3xx4htrzIzdvV1jbVtT84"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "636b6c90-db92-41bc-9e18-ea2859dec05c",
+      "name": "Supabase Overlap Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        1184
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const booking = $('Check Slot + Alternatives').first().json;\nconst resp = $json;\n\n// Supabase returns [{id:'...'}] if overlap found, [] if not\n// n8n with alwaysOutputData gives {} for empty array response\nlet hasConflict = false;\nif (Array.isArray(resp)) {\n  hasConflict = resp.length > 0;\n} else if (resp && typeof resp === 'object' && Object.keys(resp).length > 0) {\n  // non-empty: either a result row ({id:'...'}) or numeric-keyed items\n  hasConflict = true;\n}\n\nreturn [{ json: { ...booking, hasConflict } }];"
+      },
+      "id": "9358cdc4-689b-4b3c-a4fc-2a3ac5b99b97",
+      "name": "Parse Overlap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "slot-taken",
+              "leftValue": "={{ $json.hasConflict }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d8bcee5d-d55a-4328-bd0e-c1b2555e208e",
+      "name": "Is Slot Taken?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2016,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'slot_taken', message: 'That exact slot with ' + $json.assignedBarber + ' has just been confirmed for another customer. Would you like to try a different time or a different barber?' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "64e9bc87-b454-4f5b-8873-f722f98172e1",
+      "name": "Respond - Slot Taken",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2288,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Supabase Slot Guard\nSecondary check before any calendar event is created. Queries Supabase for confirmed appointments that overlap with the requested barber & time — catches race conditions where two calls reach the booking step simultaneously.",
+        "height": 148,
+        "width": 340
+      },
+      "id": "271de8f1-7151-4629-888b-f06c3206b5fc",
+      "name": "Sticky — Slot Guard",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        1024
+      ]
+    }
+  ],
+  "pinData": {
+    "Vapi Webhook - Barber Receptionist": [
+      {
+        "json": {
+          "headers": {
+            "host": "skyweb1972.app.n8n.cloud",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+            "content-length": "290",
+            "accept": "*/*",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1; subreqs=1",
+            "cf-connecting-ip": "64.227.21.251",
+            "cf-ew-via": "15",
+            "cf-ipcountry": "US",
+            "cf-ray": "a0eb9e336958d218-EWR",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-worker": "n8n.cloud",
+            "content-type": "application/json",
+            "x-forwarded-for": "64.227.21.251, 104.23.190.236",
+            "x-forwarded-host": "skyweb1972.app.n8n.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "traefik-prod-users-swc-25-667d977865-s6stv",
+            "x-is-trusted": "yes",
+            "x-real-ip": "64.227.21.251"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "intent": "book_appointment",
+            "service_type": "haircut",
+            "preferred_date": "2026-06-22",
+            "preferred_time": "14:00",
+            "preferred_barber": "Faizan",
+            "customer_name": "Test Customer",
+            "phone": "07700900999",
+            "email": "faizan.shahzad2002@gmail.com"
+          },
+          "webhookUrl": "https://skyweb1972.app.n8n.cloud/webhook-test/skyweb-barber-basic",
+          "executionMode": "test"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Normalize + Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Valid Request?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Request?": {
+      "main": [
+        [
+          {
+            "node": "Intent Router",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Missing Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Router": {
+      "main": [
+        [
+          {
+            "node": "Respond - Shop Hours",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Shop Location",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - FAQ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Human Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Inside Shop Hours?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Inside Shop Hours?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Events By Phone",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Booking To Reschedule",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Booking To Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Today Events",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Coming Soon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inside Shop Hours?": {
+      "main": [
+        [
+          {
+            "node": "Get Events For Day",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Outside Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Events For Day": {
+      "main": [
+        [
+          {
+            "node": "Check Slot + Alternatives",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Slot + Alternatives": {
+      "main": [
+        [
+          {
+            "node": "Slot Available?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slot Available?": {
+      "main": [
+        [
+          {
+            "node": "Booking Intent?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking Intent?": {
+      "main": [
+        [
+          {
+            "node": "Duplicate Booking?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate Booking?": {
+      "main": [
+        [
+          {
+            "node": "Respond - Possible Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase Overlap Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond - Booked": {
+      "main": [
+        [
+          {
+            "node": "Email - Customer Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Customer Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Email - Notify Shop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Events By Phone": {
+      "main": [
+        [
+          {
+            "node": "Find My Booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find My Booking": {
+      "main": [
+        [
+          {
+            "node": "Found Booking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Found Booking?": {
+      "main": [
+        [
+          {
+            "node": "Respond - Booking Found",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - No Booking Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Booking To Reschedule": {
+      "main": [
+        [
+          {
+            "node": "Find Booking To Reschedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Booking To Reschedule": {
+      "main": [
+        [
+          {
+            "node": "Has Existing Booking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Existing Booking?": {
+      "main": [
+        [
+          {
+            "node": "Reschedule Inside Hours?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Nothing To Reschedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Events For New Day": {
+      "main": [
+        [
+          {
+            "node": "Check Reschedule Slot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Reschedule Slot": {
+      "main": [
+        [
+          {
+            "node": "New Slot Available?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Slot Available?": {
+      "main": [
+        [
+          {
+            "node": "Update Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Reschedule Unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond - Rescheduled": {
+      "main": [
+        [
+          {
+            "node": "Email - Reschedule Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reschedule Inside Hours?": {
+      "main": [
+        [
+          {
+            "node": "Get Events For New Day",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Reschedule Outside Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Booking To Cancel": {
+      "main": [
+        [
+          {
+            "node": "Find Booking To Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Booking To Cancel": {
+      "main": [
+        [
+          {
+            "node": "Has Booking To Cancel?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Booking To Cancel?": {
+      "main": [
+        [
+          {
+            "node": "Confirm Cancel?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Nothing To Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm Cancel?": {
+      "main": [
+        [
+          {
+            "node": "Delete Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Cancel Confirm Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond - Cancelled": {
+      "main": [
+        [
+          {
+            "node": "Email - Cancellation Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today Events": {
+      "main": [
+        [
+          {
+            "node": "Find Soonest Slot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Soonest Slot": {
+      "main": [
+        [
+          {
+            "node": "Soonest Slot Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Soonest Slot Found?": {
+      "main": [
+        [
+          {
+            "node": "Respond - Walk In Slot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - No Walk In Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Reminder Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Tomorrow Events",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Past Day Off Markers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tomorrow Events": {
+      "main": [
+        [
+          {
+            "node": "Build Reminder Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Reminder Email": {
+      "main": [
+        [
+          {
+            "node": "Has Email For Reminder?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Email For Reminder?": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Barber Day Off Email Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Day Off Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Day Off Email": {
+      "main": [
+        [
+          {
+            "node": "Day Off Recognised?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Day Off Recognised?": {
+      "main": [
+        [
+          {
+            "node": "Get Affected Day Events",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Day Off Marker",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email - Day Off Not Understood",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Affected Day Events": {
+      "main": [
+        [
+          {
+            "node": "Find Affected Bookings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Affected Bookings": {
+      "main": [
+        [
+          {
+            "node": "Has Affected Bookings?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email - Notify Barber (Day Off Confirmed)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split Out Affected Bookings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Affected Bookings?": {
+      "main": [
+        [
+          {
+            "node": "Email - Day Off Action Needed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email - Day Off No Bookings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Notify Shop": {
+      "main": [
+        [
+          {
+            "node": "Email - Notify Barber (Booked)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Reschedule Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Email - Notify Barber (Rescheduled)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Cancellation Notice": {
+      "main": [
+        [
+          {
+            "node": "Email - Notify Barber (Cancelled)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Notify Barber (Booked)": {
+      "main": [
+        [
+          {
+            "node": "Sheets - Log Booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Notify Barber (Rescheduled)": {
+      "main": [
+        [
+          {
+            "node": "Sheets - Log Reschedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email - Notify Barber (Cancelled)": {
+      "main": [
+        [
+          {
+            "node": "Sheets - Log Cancellation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out Affected Bookings": {
+      "main": [
+        [
+          {
+            "node": "Sheets - Log Day Off Cancellations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Past Day Off Markers": {
+      "main": [
+        [
+          {
+            "node": "Filter Expired Day Off Markers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Expired Day Off Markers": {
+      "main": [
+        [
+          {
+            "node": "Delete Expired Day Off Marker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vapi Webhook - Barber Receptionist": {
+      "main": [
+        [
+          {
+            "node": "Fetch Shop Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Shop Data": {
+      "main": [
+        [
+          {
+            "node": "Normalize + Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Appointment": {
+      "main": [
+        [
+          {
+            "node": "Sync Booking Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Booking Create": {
+      "main": [
+        [
+          {
+            "node": "Respond - Booked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Appointment": {
+      "main": [
+        [
+          {
+            "node": "Sync Booking Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Booking Update": {
+      "main": [
+        [
+          {
+            "node": "Respond - Rescheduled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Appointment": {
+      "main": [
+        [
+          {
+            "node": "Sync Booking Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Booking Cancel": {
+      "main": [
+        [
+          {
+            "node": "Respond - Cancelled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Overlap Check": {
+      "main": [
+        [
+          {
+            "node": "Parse Overlap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Overlap": {
+      "main": [
+        [
+          {
+            "node": "Is Slot Taken?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Slot Taken?": {
+      "main": [
+        [
+          {
+            "node": "Respond - Slot Taken",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "9ce106cf-cc03-4fab-9293-11f0056c1f7e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "instanceId": "f671859db5d66c9149289953e1be2c3e7703b4f5f1ebf261bc66ef55f7fc216d"
+  },
+  "nodeGroups": [],
+  "id": "bP8xVmiwhdOafz60",
+  "tags": []
+}
