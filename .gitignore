@@ -18,3 +18,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Moved to its own repo: https://github.com/faizan-s17/Skyweb_control_center.git
+skyweb-control-center/
