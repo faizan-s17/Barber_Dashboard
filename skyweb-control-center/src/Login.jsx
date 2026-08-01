@@ -6,6 +6,7 @@ export default function Login({ deniedReason }) {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resetSent, setResetSent] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -14,6 +15,14 @@ export default function Login({ deniedReason }) {
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
     if (err) setError(err.message)
     setLoading(false)
+  }
+
+  async function handleForgotPassword(e) {
+    e.preventDefault()
+    if (!email) { setError('Enter your email above first, then click "Forgot password?"'); return }
+    setError('')
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+    setResetSent(true)
   }
 
   return (
@@ -37,6 +46,11 @@ export default function Login({ deniedReason }) {
             {error}
           </div>
         )}
+        {resetSent && (
+          <div style={{ background: 'var(--green-bg)', border: '1px solid var(--green-br)', color: 'var(--green)', borderRadius: 8, padding: '9px 12px', fontSize: 13, marginBottom: 14 }}>
+            If an account exists for {email}, a reset link is on its way.
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <input className="cc-input" type="email" placeholder="you@skyweb.co" value={email}
@@ -48,6 +62,10 @@ export default function Login({ deniedReason }) {
         <button type="submit" className="cc-btn cc-btn-primary" disabled={loading} style={{ width: '100%', marginTop: 16 }}>
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
+
+        <div style={{ textAlign: 'center', marginTop: 12 }}>
+          <a href="#" onClick={handleForgotPassword} style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>Forgot password?</a>
+        </div>
       </form>
     </div>
   )

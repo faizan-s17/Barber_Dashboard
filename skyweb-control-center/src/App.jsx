@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { supabase } from './supabase'
 import Login from './Login'
 import Dashboard from './Dashboard'
+import Health from './Health'
 import { ToastHost } from './Toast'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
   const [checkState, setCheckState] = useState('idle') // idle | checking | operator | denied
+  const [page, setPage] = useState('shops') // shops | health
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -58,10 +60,51 @@ export default function App() {
     )
   }
 
+  const TABS = [
+    { id: 'shops',  label: 'Shops' },
+    { id: 'health', label: 'Health' },
+  ]
+
   return (
-    <>
-      <Dashboard operatorEmail={session.user.email} onSignOut={handleSignOut} />
+    <div className="cc-shell">
+      <div className="cc-topbar">
+        <div className="cc-brand">
+          <span className="cc-brand-dot" />
+          <div className="cc-brand-text">
+            <strong>SkyWeb Control Center</strong>
+            <span>Operator console</span>
+          </div>
+        </div>
+
+        <nav style={{ display: 'flex', gap: 4, background: 'var(--surface2)', borderRadius: 8, padding: 3 }}>
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setPage(t.id)}
+              style={{
+                padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                fontSize: 13, fontWeight: 600, transition: 'all .15s',
+                background: page === t.id ? 'var(--accent)' : 'transparent',
+                color: page === t.id ? '#fff' : 'var(--text-muted)',
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>{session.user.email}</span>
+          <button className="cc-btn cc-btn-ghost" onClick={handleSignOut}>Sign out</button>
+        </div>
+      </div>
+
+      <div className="cc-main">
+        {page === 'shops' && <Dashboard />}
+        {page === 'health' && <Health />}
+      </div>
+
       <ToastHost />
-    </>
+    </div>
   )
 }
