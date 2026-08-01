@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import { ToastContainer, toast } from './components/Toast'
 import Sidebar from './components/Sidebar'
 import Login from './pages/Login'
+import SetPassword from './pages/SetPassword'
 import Overview from './pages/Overview'
 import Services from './pages/Services'
 import Calendar from './pages/Calendar'
@@ -10,7 +11,6 @@ import SettingsHub from './pages/SettingsHub'
 import Clients from './pages/Clients'
 import Calls from './pages/Calls'
 import AutomationHealth from './pages/AutomationHealth'
-import OnboardShop from './pages/OnboardShop'
 import Usage from './pages/Usage'
 import Waitlist from './pages/Waitlist'
 import { ShopProvider } from './ShopContext'
@@ -21,6 +21,14 @@ export default function App() {
   const [profile, setProfile] = useState(null)
   const [profState, setProfState] = useState('loading') // loading | found | not_found
   const [page, setPage] = useState('overview')
+  // Supabase logs invite/recovery links straight into a session via a token in
+  // the URL hash, but never prompts for a password -- captured once, on first
+  // render, before anything has a chance to strip the hash.
+  const [authFlowType] = useState(() => {
+    const m = /type=(invite|recovery)/.exec(window.location.hash)
+    return m ? m[1] : null
+  })
+  const [passwordSet, setPasswordSet] = useState(false)
 
   // Light-only product. Clear any stale dark preference from earlier builds so
   // returning users don't get a half-styled page from the removed theme.
@@ -72,6 +80,22 @@ export default function App() {
   // ── Not logged in ──
   if (!session) return <><Login /><ToastContainer /></>
 
+  // ── Invite/recovery link logged them in, but they've never set a password ──
+  if (authFlowType && !passwordSet) {
+    return (
+      <>
+        <SetPassword
+          mode={authFlowType}
+          onDone={() => {
+            setPasswordSet(true)
+            window.history.replaceState(null, '', window.location.pathname)
+          }}
+        />
+        <ToastContainer />
+      </>
+    )
+  }
+
   // ── No barber profile found ──
   if (profState === 'not_found') {
     return (
@@ -110,7 +134,6 @@ export default function App() {
             {page === 'usage'     && <Usage            isOperator={isOperator} />}
             {/* diagnostics are SkyWeb's, not the shop's — gated on the route, not just hidden in nav */}
             {page === 'health'    && isOperator && <AutomationHealth />}
-            {page === 'shops'     && isOperator && <OnboardShop />}
             {page === 'services'  && <Services         isAdmin={isAdmin} />}
             {page === 'settings'  && <SettingsHub      isAdmin={isAdmin} isOperator={isOperator} />}
           </div>

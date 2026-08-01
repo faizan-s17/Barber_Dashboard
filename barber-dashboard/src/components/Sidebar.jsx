@@ -21,7 +21,6 @@ const NAV = [
   { id: 'settings', label: 'Settings',     icon: 'sliders',   primary: false, group: 'Manage' },
   { id: 'usage',    label: 'My Plan',      icon: 'gauge',     primary: false, group: 'Manage' },
   { id: 'health',   label: 'System Health', icon: 'activity', primary: false, group: 'SkyWeb', operatorOnly: true },
-  { id: 'shops',    label: 'Barber Shops', icon: 'store',     primary: false, group: 'SkyWeb', operatorOnly: true },
 ]
 
 const GROUPS = ['Shop', 'Manage', 'SkyWeb']

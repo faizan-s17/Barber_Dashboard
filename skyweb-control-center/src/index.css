@@ -1,0 +1,104 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0b0d12;
+  --surface:   #12151c;
+  --surface2:  #191d27;
+  --surface3:  #232838;
+  --border:    #262b3a;
+  --border-strong: #333952;
+
+  --accent:      #5b8cff;
+  --accent-dim:  rgba(91,140,255,.10);
+  --accent-br:   rgba(91,140,255,.30);
+  --accent-hover: #4a78e6;
+  --on-accent:  #ffffff;
+
+  --text:       #e8eaf0;
+  --text-muted: #a6acc0;
+  --text-dim:   #6b7290;
+
+  --green: #34d399;  --green-bg: rgba(52,211,153,.10);  --green-br: rgba(52,211,153,.30);
+  --red:   #f87171;  --red-bg:   rgba(248,113,113,.10);  --red-br:   rgba(248,113,113,.30);
+  --amber: #fbbf24;  --amber-bg: rgba(251,191,36,.10);   --amber-br: rgba(251,191,36,.30);
+
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px;
+  --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.55;
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select { font-family: inherit; }
+
+.cc-shell { min-height: 100vh; display: flex; flex-direction: column; }
+
+.cc-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 28px; border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.cc-brand { display: flex; align-items: center; gap: 10px; }
+.cc-brand-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.cc-brand-text strong { font-size: 15px; letter-spacing: .2px; }
+.cc-brand-text span { display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 1px; }
+
+.cc-main { flex: 1; padding: 28px; max-width: 1100px; width: 100%; margin: 0 auto; }
+
+.cc-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: 22px 24px;
+}
+
+.cc-label {
+  font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase;
+  letter-spacing: .6px; margin-bottom: 2px;
+}
+
+.cc-input {
+  width: 100%; padding: 9px 11px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text);
+  font-size: 13.5px; box-sizing: border-box; transition: border-color .15s;
+}
+.cc-input:focus { outline: none; border-color: var(--accent-br); }
+.cc-input::placeholder { color: var(--text-dim); }
+
+.cc-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 16px; border-radius: var(--r-sm); font-size: 13.5px; font-weight: 600;
+  border: 1px solid transparent; cursor: pointer; transition: all .15s;
+}
+.cc-btn-primary { background: var(--accent); color: var(--on-accent); }
+.cc-btn-primary:hover { background: var(--accent-hover); }
+.cc-btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.cc-btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border); }
+.cc-btn-ghost:hover { color: var(--text); border-color: var(--border-strong); }
+
+.cc-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; padding: 8px 10px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--r-sm); word-break: break-all;
+  color: var(--text-muted);
+}
+
+.cc-badge {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+  padding: 2px 8px; border-radius: 4px; border: 1px solid;
+}
+
+.cc-toast {
+  position: fixed; bottom: 20px; right: 20px; z-index: 500;
+  background: var(--surface3); border: 1px solid var(--border-strong); color: var(--text);
+  padding: 10px 16px; border-radius: var(--r-sm); font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  animation: cc-toast-in .18s ease-out;
+}
+@keyframes cc-toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }

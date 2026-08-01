@@ -9,7 +9,22 @@ export default function Login() {
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resetSent, setResetSent] = useState(false)
   const emailRef = useRef(null)
+
+  async function handleForgotPassword(e) {
+    e.preventDefault()
+    if (!email) {
+      setError('Enter your email above first, then click "Forgot your password?"')
+      emailRef.current?.focus()
+      return
+    }
+    setError('')
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+    // Supabase always reports success here regardless of whether the email
+    // exists, so this can't be used to probe which emails have accounts.
+    setResetSent(true)
+  }
 
   async function handleLogin(e) {
     e.preventDefault()
@@ -47,6 +62,13 @@ export default function Login() {
                 </div>
               )}
 
+              {resetSent && (
+                <div className="login-error" role="status" style={{ background: 'var(--green-bg)', borderColor: 'var(--green-br)', color: 'var(--green)' }}>
+                  <Icon name="checkCircle" size={15} style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                  If an account exists for {email}, a reset link is on its way.
+                </div>
+              )}
+
               <div className="form-group">
                 <label htmlFor="login-email">Email</label>
                 <input
@@ -67,7 +89,7 @@ export default function Login() {
               <div className="form-group">
                 <div className="login-label-row">
                   <label htmlFor="login-password">Password</label>
-                  <a href="#" className="login-forgot" tabIndex={-1}>Forgot your password?</a>
+                  <a href="#" className="login-forgot" onClick={handleForgotPassword}>Forgot your password?</a>
                 </div>
                 <div className="input-affix">
                   <input
