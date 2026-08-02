@@ -21,3 +21,14 @@ Thumbs.db
 
 # Moved to its own repo: https://github.com/faizan-s17/Skyweb_control_center.git
 skyweb-control-center/
+
+# Kept locally only, not part of the tracked project
+BARBER_V2_PLAN.md
+DOGRAH_PROMPTS.md
+Google Calendar Setup.docx
+SAAS-GAP-ANALYSIS.html
+SkyWeb Barber AI Receptionist - Phase 0-8 (1).json
+WHATS_LEFT.md
+cost-comparison-pkr.html
+cost-comparison.html
+livekit-barber/
