@@ -130,7 +130,7 @@ export default function App() {
             {page === 'calendar'  && <Calendar    profile={profile} />}
             {page === 'clients'   && <Clients          isAdmin={isAdmin} />}
             {page === 'waitlist'  && <Waitlist         isAdmin={isAdmin} />}
-            {page === 'calls'     && <Calls />}
+            {page === 'calls'     && <Calls isAdmin={isAdmin} />}
             {page === 'usage'     && <Usage            isOperator={isOperator} />}
             {/* diagnostics are SkyWeb's, not the shop's — gated on the route, not just hidden in nav */}
             {page === 'health'    && isOperator && <AutomationHealth />}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { useBranding } from '../ShopContext'
+import { toast } from '../components/Toast'
 import Icon from '../components/Icon'
 
 const TZ = 'Europe/London'
@@ -45,13 +46,26 @@ function length(sec) {
   return m ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`
 }
 
-export default function Calls() {
+export default function Calls({ isAdmin }) {
   const [logs,       setLogs]       = useState([])
   const [loading,    setLoading]    = useState(true)
   const [search,     setSearch]     = useState('')
   const [filter,     setFilter]     = useState('all')
   const [exportOpen, setExportOpen] = useState(false)
+  const [syncing,    setSyncing]    = useState(false)
+  const [detail,     setDetail]     = useState(null)
   const brand = useBranding()
+
+  async function syncCalls() {
+    setSyncing(true)
+    const { data, error } = await supabase.functions.invoke('sync-dograh-calls')
+    setSyncing(false)
+    if (error || data?.error) {
+      toast.error('Sync failed: ' + (data?.error || error.message))
+      return
+    }
+    toast.success(data.inserted > 0 ? `Added ${data.inserted} new call${data.inserted !== 1 ? 's' : ''}` : 'No new calls')
+  }
 
   useEffect(() => {
     async function load() {
@@ -178,6 +192,11 @@ export default function Calls() {
             ))}
           </div>
           <div style={{ flex: 1 }} />
+          {isAdmin && (
+            <button className="btn btn-ghost btn-sm" onClick={syncCalls} disabled={syncing}>
+              <Icon name="refresh" size={14} /> {syncing ? 'Syncing…' : 'Sync recent calls'}
+            </button>
+          )}
           <div className="dropdown">
             <button className="btn btn-ghost btn-sm" aria-haspopup="menu" aria-expanded={exportOpen}
                     onClick={() => setExportOpen(o => !o)}>
@@ -216,13 +235,14 @@ export default function Calls() {
                   <th scope="col" className="hide-mobile">Length</th>
                   <th scope="col" className="hide-mobile">Booking</th>
                   <th scope="col">When</th>
+                  <th scope="col" aria-label="Recording" />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(l => {
                   const r = result(l)
                   return (
-                    <tr key={l.id}>
+                    <tr key={l.id} onClick={() => setDetail(l)} style={{ cursor: 'pointer' }}>
                       <td>
                         <div style={{ fontWeight: 600 }}>
                           {l.caller_name || <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>Unknown caller</span>}
@@ -240,6 +260,9 @@ export default function Calls() {
                           : <span style={{ color: 'var(--text-dim)' }}>—</span>}
                       </td>
                       <td style={{ color: 'var(--text-dim)', whiteSpace: 'nowrap', fontSize: 'var(--fs-xs)' }}>{fmt(l.created_at)}</td>
+                      <td>
+                        {l.recording_url && <Icon name="phone" size={14} style={{ color: 'var(--gold)' }} />}
+                      </td>
                     </tr>
                   )
                 })}
@@ -251,6 +274,58 @@ export default function Calls() {
           </div>
         )}
       </div>
+
+      {detail && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDetail(null)}>
+          <div className="modal" style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <h2 style={{ fontSize: 16 }}>Call Details</h2>
+              <button className="modal-close" onClick={() => setDetail(null)}>×</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '4px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className={`badge ${result(detail).cls}`}>{result(detail).label}</span>
+              </div>
+              {[
+                ['Caller',   detail.caller_name],
+                ['Phone',    detail.caller_phone],
+                ['Wanted',   WANTED[detail.intent] || 'Something else'],
+                ['Length',   length(detail.duration_seconds)],
+                ['Booking',  detail.booking_id],
+                ['When',     fmt(detail.created_at)],
+                ['Notes',    detail.notes],
+              ].map(([label, val]) => val && (
+                <div key={label} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, fontSize: 13 }}>
+                  <span style={{ color: 'var(--text-dim)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.5px', paddingTop: 1 }}>{label}</span>
+                  <span style={{ color: 'var(--text)' }}>{val}</span>
+                </div>
+              ))}
+
+              {detail.recording_url && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>Recording</div>
+                  <audio controls src={detail.recording_url} style={{ width: '100%' }} />
+                </div>
+              )}
+
+              {detail.transcript && (
+                <div style={{ marginTop: 4 }}>
+                  <a href={detail.transcript} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex' }}>
+                    View transcript ↗
+                  </a>
+                </div>
+              )}
+
+              {!detail.recording_url && !detail.transcript && (
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>No recording or transcript available for this call.</div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setDetail(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
